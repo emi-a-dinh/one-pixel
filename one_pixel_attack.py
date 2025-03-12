@@ -4,7 +4,7 @@ from cv2 import imread, imwrite
 from scipy.optimize import differential_evolution
 
 
-MODEL = "http://localhost:5000/predict"
+MODEL = "http://localhost:5000/"
 
 """ TODO: need to ensure that this is how to format the payload"""
 def call_model(image_path):
