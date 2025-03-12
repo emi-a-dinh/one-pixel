@@ -2,6 +2,7 @@ import requests
 import numpy as np
 from cv2 import imread, imwrite
 from scipy.optimize import differential_evolution
+import Image
 
 
 MODEL = "http://localhost:5000/predict"
