@@ -38,7 +38,7 @@ def produce_altered_image(image, pixel):
     return altered_image
 
 
-path = "one-pixel/1_01_01_0_0_0_0_0_.png"
+path = "1_01_01_0_0_0_0_0_.png"
 original = call_model(path)
 print("original :", original)
 
