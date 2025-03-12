@@ -10,7 +10,7 @@ MODEL = "http://localhost:5000/"
 def call_model(image_path):
     with open(image_path, 'rb') as image_file:
         files = {'image': image_file}
-        response = requests.post(MODEL + "predict", files=files)
+        response = requests.post(MODEL + "predict/", files=files)
     return response.json()
 
 
