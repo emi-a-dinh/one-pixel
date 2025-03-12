@@ -6,7 +6,7 @@ from PIL import Image
 import io
 
 
-MODEL = "http://0.0.0.0:5000"
+MODEL = "http://0.0.0.0:5000/model/predict"
 
 """ TODO: need to ensure that this is how to format the payload"""
 def call_model(image_array):
