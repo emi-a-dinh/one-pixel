@@ -7,10 +7,23 @@ from scipy.optimize import differential_evolution
 MODEL = "http://localhost:5000/predict"
 
 """ TODO: need to ensure that this is how to format the payload"""
-def call_model(image_path):
-    with open(image_path, 'rb') as image_file:
-        files = {'image': (image_path, image_file, 'image/png')}
-        response = requests.post(MODEL, files=files)
+def call_model(image_array):
+    # Convert numpy array to bytes
+    img_pil = Image.fromarray(np.uint8(image_array))
+    
+    # Ensure 64x64 size
+    if img_pil.size != (64, 64):
+        img_pil = img_pil.resize((64, 64))
+    
+    # Convert to PNG bytes
+    buffer = io.BytesIO()
+    img_pil.save(buffer, format='PNG')
+    buffer.seek(0)
+    
+    # Send to API
+    files = {'image': ('image.png', buffer, 'image/png')}
+    response = requests.post(MODEL, files=files)
+    
     return response.json()
 
 
@@ -39,12 +52,12 @@ def produce_altered_image(image, pixel):
 
 
 path = "1_01_01_0_0_0_0_0_.png"
-original = call_model(path)
+image = imread(path)
+original = call_model(image)
 print("original :", original)
 
 preset_colors = [[0,0,0], [255,255,255], [255, 255, 0]] # based on research
 
-image = imread(path)
 optimal_pixel = one_pixel_attack(image, preset_colors)
 print("optimal pixel:", optimal_pixel)
 
