@@ -1,15 +1,16 @@
 import requests
 import numpy as np
-from cv2 import imread
+from cv2 import imread, imwrite
 from scipy.optimize import differential_evolution
 
 
-MODEL = "http://localhost:5000/"
+MODEL = "http://localhost:5000/predict"
 
 """ TODO: need to ensure that this is how to format the payload"""
-def call_model(image):
-    payload = {"image": image.tolist()}
-    response = requests.post(MODEL, json=payload)
+def call_model(image_path):
+    with open(image_path, 'rb') as image_file:
+        files = {'image': image_file}
+        response = requests.post(MODEL + "predict", files=files)
     return response.json()
 
 
@@ -37,15 +38,18 @@ def produce_altered_image(image, pixel):
     return altered_image
 
 
-image = imread("20.jpeg")
-original = call_model(image)
+path = "one-pixel/1_01_01_0_0_0_0_0_.png"
+original = call_model(path)
 print("original :", original)
 
 preset_colors = [[0,0,0], [255,255,255], [255, 255, 0]] # based on research
 
+image = imread(path)
 optimal_pixel = one_pixel_attack(image, preset_colors)
 print("optimal pixel:", optimal_pixel)
 
 altered = produce_altered_image(image, optimal_pixel)
 new_prediction = call_model(altered)
 print("New Prediction:", new_prediction)
+
+imwrite("altered_image.png", altered)
