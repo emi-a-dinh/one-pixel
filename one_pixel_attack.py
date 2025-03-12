@@ -5,8 +5,12 @@ from scipy.optimize import differential_evolution
 from PIL import Image
 import io
 
+response = requests.get("http://localhost:5000/")
+print(f"Status: {response.status_code}")
+print(f"Content: {response.text}")
 
-MODEL = "http://localhost:5000/predict"
+
+MODEL = "http://0.0.0.0:5000/predict"
 
 """ TODO: need to ensure that this is how to format the payload"""
 def call_model(image_array):
