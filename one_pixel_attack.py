@@ -34,8 +34,11 @@ def one_pixel_attack(image, preset_colors, max_iter=100):
         img_copy = image.copy()
         x, y, color_idx = int(params[0]), int(params[1]), int(params[2])
         r, g, b = preset_colors[color_idx % len(preset_colors)]
-        img_copy[y, x] = [r, g, b] 
-        return call_model(img_copy)["confidence"] 
+        img_copy[y, x] = [b, g, r]  # OpenCV uses BGR order
+        
+        # Access the correct key path in the response
+        response = call_model(img_copy)
+        return -response["predictions"][0]["probability"]  # Negative because we're minimizing
 
     bounds = [(0, 64), (0, 64), (0, len(preset_colors)-0.001)]
     result = differential_evolution(perturbation, bounds, maxiter=max_iter)
