@@ -4,13 +4,13 @@ from cv2 import imread, imwrite
 from scipy.optimize import differential_evolution
 
 
-MODEL = "http://localhost:5000/"
+MODEL = "http://localhost:5000/predict"
 
 """ TODO: need to ensure that this is how to format the payload"""
 def call_model(image_path):
     with open(image_path, 'rb') as image_file:
-        files = {'image': image_file}
-        response = requests.post(MODEL + "predict/", files=files)
+        files = {'image': (image_path, image_file, 'image/png')}
+        response = requests.post(MODEL, files=files)
     return response.json()
 
 
