@@ -1,0 +1,51 @@
+import requests
+import numpy as np
+from cv2 import imread
+from scipy.optimize import differential_evolution
+
+
+MODEL = "http://localhost:5000/"
+
+""" TODO: need to ensure that this is how to format the payload"""
+def call_model(image):
+    payload = {"image": image.tolist()}
+    response = requests.post(MODEL, json=payload)
+    return response.json()
+
+
+def one_pixel_attack(image, preset_colors, max_iter=100):
+    def perturbation(params):
+        img_copy = image.copy()
+        x, y, color_idx = int(params[0]), int(params[1]), int(params[2])
+        r, g, b = preset_colors[color_idx % len(preset_colors)]
+        img_copy[y, x] = [r, g, b] 
+        return call_model(img_copy)["confidence"] 
+
+    bounds = [(0, 64), (0, 64), (0, len(preset_colors)-0.001)]
+    result = differential_evolution(perturbation, bounds, maxiter=max_iter)
+
+    x, y, color_idx = int(result.x[0]), int(result.x[1]), int(result.x[2])
+    r, g, b = preset_colors[color_idx % len(preset_colors)]
+    return [x, y, r, g, b]
+
+
+def produce_altered_image(image, pixel):
+    altered_image = image.copy()
+    x, y, r, g, b = map(int, pixel)
+    altered_image[y, x] = [r, g, b]
+
+    return altered_image
+
+
+image = imread("20.jpeg")
+original = call_model(image)
+print("original :", original)
+
+preset_colors = [[0,0,0], [255,255,255], [255, 255, 0]] # based on research
+
+optimal_pixel = one_pixel_attack(image, preset_colors)
+print("optimal pixel:", optimal_pixel)
+
+altered = produce_altered_image(image, optimal_pixel)
+new_prediction = call_model(altered)
+print("New Prediction:", new_prediction)
