@@ -8,7 +8,7 @@ import io
 
 MODEL = "http://0.0.0.0:5000/model/predict"
 
-""" TODO: need to ensure that this is how to format the payload"""
+
 def call_model(image_array):
     # Convert numpy array to bytes
     img_pil = Image.fromarray(np.uint8(image_array))
@@ -38,7 +38,7 @@ def one_pixel_attack(image, preset_colors, max_iter=100):
         
         # Access the correct key path in the response
         response = call_model(img_copy)
-        return -response["predictions"][0]["probability"]  # Negative because we're minimizing
+        return response["predictions"][0]["probability"]  # Negative because we're minimizing
 
     bounds = [(0, 64), (0, 64), (0, len(preset_colors)-0.001)]
     result = differential_evolution(perturbation, bounds, maxiter=max_iter)
@@ -70,4 +70,4 @@ altered = produce_altered_image(image, optimal_pixel)
 new_prediction = call_model(altered)
 print("New Prediction:", new_prediction)
 
-imwrite("altered_image.png", altered)
+imwrite("altered_image1.png", altered)
