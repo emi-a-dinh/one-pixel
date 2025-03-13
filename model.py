@@ -9,7 +9,8 @@ import sys
 
 
 def main():
-    image = imread(sys.argv[0])
+    path = sys.argv[1]
+    image = imread(path)
     print(call_model(image))
 
 
