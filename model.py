@@ -1,6 +1,6 @@
 import requests
 import numpy as np
-from cv2 import imread, imwrite
+from cv2 import imread
 from scipy.optimize import differential_evolution
 from PIL import Image
 import io
@@ -10,10 +10,9 @@ import sys
 
 def main():
     path = sys.argv[1]
+    print("path", path)
     image = imread(path)
     print(call_model(image))
-
-
 
 MODEL = "http://0.0.0.0:5000/model/predict"
 
