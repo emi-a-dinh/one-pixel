@@ -183,6 +183,35 @@ def fgsm_attack(image, target_label=1, epsilon=0.1):
     return adversarial_image.numpy().squeeze().astype(np.uint8)
 
 
+def fgsm_attack_api(image, target_label=1, epsilon=0.1):
+    """Performs FGSM attack using API calls instead of local model gradients."""
+    
+    image = image.astype(np.float32)  # Convert to float32
+    perturbation = np.zeros_like(image)  # Initialize perturbation array
+    delta = 1e-3  # Small perturbation for finite difference approximation
+
+    # Compute numerical gradient for each pixel
+    for i in range(image.shape[0]):
+        for j in range(image.shape[1]):
+            for c in range(image.shape[2]):
+                perturbed_image = image.copy()
+                perturbed_image[i, j, c] += delta  # Slightly increase pixel value
+
+                original_pred = call_modelapi(image)["predictions"][0]["probability"]
+                perturbed_pred = call_modelapi(perturbed_image)["predictions"][0]["probability"]
+
+                # Compute approximate gradient (finite difference)
+                gradient = (perturbed_pred - original_pred) / delta
+                perturbation[i, j, c] = gradient
+
+    # Apply adversarial perturbation in the direction of the gradient
+    signed_grad = np.sign(perturbation)
+    adversarial_image = image + epsilon * signed_grad  # Modify image
+    adversarial_image = np.clip(adversarial_image, 0, 255).astype(np.uint8)  # Keep valid pixel values
+
+    return adversarial_image
+
+
 def produce_altered_image(image, pixel):
     altered_image = image.copy()
     x, y, r, g, b = map(int, pixel)
@@ -208,13 +237,19 @@ imwrite("altered_image_api.png", new_api_image)
 new_api = call_modelapi("altered_image_api.png")
 print("Pixel attack API", new_api)
 
-optimal_pixel = one_pixel_attack(image, preset_colors)
+fggm_api = fgsm_attack_api(path)
+new_fgsm_image = produce_altered_image(fggm_api, fggm_api)
+imwrite("fgsm.png", new_fgsm_image)
+new_fgsm = call_modelapi("fgsm.png")
+print("Pixel attack api fgsm", new_fgsm)
+
+# optimal_pixel = one_pixel_attack(image, preset_colors)
 # print("Optimal Pixel:", optimal_pixel)
 
 
-altered = produce_altered_image(image, optimal_pixel)
-new_prediction = call_model(altered)
-print("Differential Evolution Prediction:", new_prediction)
+# altered = produce_altered_image(image, optimal_pixel)
+# new_prediction = call_model(altered)
+# print("Differential Evolution Prediction:", new_prediction)
 
 fgsm_image = fgsm_attack(image)
 fgsm_prediction = call_model(fgsm_image)
