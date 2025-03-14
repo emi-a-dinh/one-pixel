@@ -1,8 +1,6 @@
 import numpy as np
-from cv2 import imread, imwrite
 from scipy.optimize import differential_evolution
-from PIL import Image
-import io
+import h5py
 import os
 import concurrent.futures
 import argparse
@@ -10,7 +8,6 @@ import pandas as pd
 import time
 from tqdm import tqdm
 import logging
-import shutil
 import tensorflow as tf
 
 # Configure logging
@@ -38,28 +35,31 @@ def load_model(model_path):
         logging.error(f"Failed to load model: {e}")
         return False
 
-def preprocess_image(image_array):
-    """Preprocess image for model input"""
+def preprocess_data(data_array):
+    """Preprocess data array for model input"""
     try:
-        # Convert to PIL image
-        img_pil = Image.fromarray(np.uint8(image_array))
+        # Ensure data is float and normalized (0-1)
+        if data_array.dtype != np.float32 and data_array.dtype != np.float64:
+            data_array = data_array.astype(np.float32)
+            if data_array.max() > 1.0:
+                data_array = data_array / 255.0
         
-        # Ensure 64x64 size
-        if img_pil.size != (64, 64):
-            img_pil = img_pil.resize((64, 64))
+        # Reshape if needed (assuming model expects 64x64 images)
+        if data_array.shape[-3:-1] != (64, 64):
+            # Resize to 64x64
+            from skimage.transform import resize
+            data_array = resize(data_array, (64, 64, 3), anti_aliasing=True)
         
-        # Convert to numpy array and normalize
-        img_array = np.array(img_pil) / 255.0
+        # Add batch dimension if not present
+        if len(data_array.shape) == 3:
+            data_array = np.expand_dims(data_array, axis=0)
         
-        # Add batch dimension
-        img_array = np.expand_dims(img_array, axis=0)
-        
-        return img_array
+        return data_array
     except Exception as e:
-        logging.error(f"Error in preprocess_image: {e}")
+        logging.error(f"Error in preprocess_data: {e}")
         return None
 
-def call_model(image_array):
+def call_model(data_array):
     """Use the loaded model to get predictions"""
     try:
         # Ensure model is loaded
@@ -67,8 +67,8 @@ def call_model(image_array):
             logging.error("Model not loaded. Call load_model first.")
             return {"predictions": [{"probability": 0}]}
         
-        # Preprocess image
-        preprocessed = preprocess_image(image_array)
+        # Preprocess data
+        preprocessed = preprocess_data(data_array)
         if preprocessed is None:
             return {"predictions": [{"probability": 0}]}
         
@@ -83,7 +83,7 @@ def call_model(image_array):
         logging.error(f"Error in call_model: {e}")
         return {"predictions": [{"probability": 0}]}
 
-def one_pixel_attack(image, preset_colors, max_iter=100, patience=10):
+def one_pixel_attack(data, preset_colors, max_iter=100, patience=10):
     """Perform one-pixel attack with early stopping"""
     best_score = float('inf')
     patience_counter = 0
@@ -91,18 +91,18 @@ def one_pixel_attack(image, preset_colors, max_iter=100, patience=10):
     def perturbation(params):
         nonlocal best_score, patience_counter
         
-        img_copy = image.copy()
+        data_copy = data.copy()
         x, y, color_idx = int(params[0]), int(params[1]), int(params[2])
         
         # Handle edge cases
-        x = min(max(x, 0), img_copy.shape[1] - 1)
-        y = min(max(y, 0), img_copy.shape[0] - 1)
+        x = min(max(x, 0), data_copy.shape[1] - 1)
+        y = min(max(y, 0), data_copy.shape[0] - 1)
         
         r, g, b = preset_colors[color_idx % len(preset_colors)]
-        img_copy[y, x] = [b, g, r]  # OpenCV uses BGR order
+        data_copy[y, x] = [r/255.0, g/255.0, b/255.0]  # Normalize color values
         
         # Access the correct key path in the response
-        response = call_model(img_copy)
+        response = call_model(data_copy)
         score = response["predictions"][0]["probability"]
         
         # Early stopping logic
@@ -130,87 +130,84 @@ def one_pixel_attack(image, preset_colors, max_iter=100, patience=10):
     x, y, color_idx = int(result.x[0]), int(result.x[1]), int(result.x[2])
     r, g, b = preset_colors[color_idx % len(preset_colors)]
     
-    # OpenCV uses BGR order, so we return the pixel info in BGR
-    return [x, y, b, g, r]
+    # Return pixel info in RGB
+    return [x, y, r/255.0, g/255.0, b/255.0]
 
-def produce_altered_image(image, pixel):
-    """Create a new image with the pixel attack applied"""
-    altered_image = image.copy()
-    x, y, b, g, r = map(int, pixel)
+def produce_altered_data(data, pixel):
+    """Create a new data array with the pixel attack applied"""
+    altered_data = data.copy()
+    x, y, r, g, b = pixel
     
     # Ensure coordinates are within bounds
-    x = min(max(x, 0), altered_image.shape[1] - 1)
-    y = min(max(y, 0), altered_image.shape[0] - 1)
+    x = min(max(int(x), 0), altered_data.shape[1] - 1)
+    y = min(max(int(y), 0), altered_data.shape[0] - 1)
     
-    altered_image[y, x] = [b, g, r]
-    return altered_image
+    altered_data[y, x] = [r, g, b]
+    return altered_data
 
-def process_single_image(image_path, original_dir, adversarial_dir, results_list, 
-                         preset_colors=PRESET_COLORS, max_iter=100, image_type="normal",
-                         remove_original=True):
-    """Process a single image for pixel attack"""
+def process_single_hdf5_dataset(file_path, dataset_name, original_dir, adversarial_dir, results_list, 
+                               preset_colors=PRESET_COLORS, max_iter=100, data_type="normal"):
+    """Process a single dataset from an HDF5 file for pixel attack"""
     try:
         # Extract filename
-        filename = os.path.basename(image_path)
+        filename = os.path.basename(file_path)
         
-        # Read image
-        image = imread(image_path)
-        if image is None:
-            logging.error(f"Failed to read image: {image_path}")
-            return
-            
+        # Read data from HDF5
+        with h5py.File(file_path, 'r') as hf:
+            if dataset_name not in hf:
+                logging.error(f"Dataset {dataset_name} not found in {file_path}")
+                return
+                
+            data = hf[dataset_name][:]
+        
         # Get original prediction
-        original_pred = call_model(image)
+        original_pred = call_model(data)
         original_prob = original_pred.get("predictions", [{}])[0].get("probability", 0)
         
         # Run attack
         start_time = time.time()
-        optimal_pixel = one_pixel_attack(image, preset_colors, max_iter=max_iter)
+        optimal_pixel = one_pixel_attack(data, preset_colors, max_iter=max_iter)
         attack_time = time.time() - start_time
         
-        # Create altered image
-        altered = produce_altered_image(image, optimal_pixel)
+        # Create altered data
+        altered = produce_altered_data(data, optimal_pixel)
         
         # Get new prediction
         new_pred = call_model(altered)
         new_prob = new_pred.get("predictions", [{}])[0].get("probability", 0)
         
-        # Copy original image to original directory
-        original_output_path = os.path.join(original_dir, filename)
-        imwrite(original_output_path, image)
+        # Create new HDF5 files for original and altered data
+        original_output_path = os.path.join(original_dir, f"{filename}_{dataset_name}_original.h5")
+        adversarial_output_path = os.path.join(adversarial_dir, f"{filename}_{dataset_name}_adversarial.h5")
         
-        # Save altered image to adversarial directory
-        adversarial_output_path = os.path.join(adversarial_dir, filename)
-        imwrite(adversarial_output_path, altered)
-        
-        # Remove original image from input directory
-        if remove_original:
-            try:
-                os.remove(image_path)
-                logging.info(f"Removed original image: {image_path}")
-            except Exception as e:
-                logging.error(f"Failed to remove original image {image_path}: {e}")
+        # Save original data
+        with h5py.File(original_output_path, 'w') as hf:
+            hf.create_dataset(dataset_name, data=data)
+            
+        # Save altered data
+        with h5py.File(adversarial_output_path, 'w') as hf:
+            hf.create_dataset(dataset_name, data=altered)
         
         # Store results
-        x, y, b, g, r = optimal_pixel
+        x, y, r, g, b = optimal_pixel
         results_list.append({
-            "filename": filename,
-            "type": image_type,
+            "filename": f"{filename}_{dataset_name}",
+            "type": data_type,
             "original_probability": original_prob,
             "new_probability": new_prob,
             "difference": original_prob - new_prob,
             "pixel_x": x,
             "pixel_y": y,
-            "pixel_b": b,
-            "pixel_g": g,
             "pixel_r": r,
+            "pixel_g": g,
+            "pixel_b": b,
             "attack_time": attack_time
         })
         
-        logging.info(f"Processed {image_type} image {filename} - Original: {original_prob:.4f}, New: {new_prob:.4f}, Diff: {original_prob - new_prob:.4f}")
+        logging.info(f"Processed {data_type} dataset {filename}:{dataset_name} - Original: {original_prob:.4f}, New: {new_prob:.4f}, Diff: {original_prob - new_prob:.4f}")
         
     except Exception as e:
-        logging.error(f"Error processing {image_path}: {e}")
+        logging.error(f"Error processing {file_path}:{dataset_name}: {e}")
 
 def setup_directories(base_output_dir):
     """Set up directory structure for the experiment"""
@@ -231,131 +228,204 @@ def setup_directories(base_output_dir):
     
     return dirs
 
-def batch_process_images(normal_input_dir, cancer_input_dir, output_dir, 
-                         normal_limit=20000, cancer_limit=1000, 
-                         max_workers=8, max_iterations=100,
-                         remove_originals=True):
-    """Process normal and cancer images separately with specified limits"""
+def get_hdf5_datasets(file_path):
+    """Get all dataset names from an HDF5 file"""
+    datasets = []
+    
+    def collect_datasets(name, obj):
+        if isinstance(obj, h5py.Dataset):
+            datasets.append(name)
+    
+    with h5py.File(file_path, 'r') as hf:
+        hf.visititems(collect_datasets)
+    
+    return datasets
+
+def batch_process_hdf5(normal_input_dir, cancer_input_dir, output_dir, 
+                      normal_limit=20000, cancer_limit=1000, 
+                      max_workers=8, max_iterations=100,
+                      normal_dataset='data', cancer_dataset='data'):
+    """Process normal and cancer HDF5 files separately with specified limits"""
     
     # Setup directory structure
     dirs = setup_directories(output_dir)
     
-    # Get normal image files (limit to 20,000)
+    # Get normal HDF5 files
     normal_files = [os.path.join(normal_input_dir, f) for f in os.listdir(normal_input_dir) 
-                  if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+                  if f.lower().endswith('.h5') or f.lower().endswith('.hdf5')]
     normal_files = normal_files[:normal_limit]
-    logging.info(f"Found {len(normal_files)} normal images to process (limit: {normal_limit})")
+    logging.info(f"Found {len(normal_files)} normal HDF5 files to process (limit: {normal_limit})")
     
-    # Get cancer image files (limit to 1,000)
+    # Get cancer HDF5 files
     cancer_files = [os.path.join(cancer_input_dir, f) for f in os.listdir(cancer_input_dir) 
-                  if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+                  if f.lower().endswith('.h5') or f.lower().endswith('.hdf5')]
     cancer_files = cancer_files[:cancer_limit]
-    logging.info(f"Found {len(cancer_files)} cancer images to process (limit: {cancer_limit})")
+    logging.info(f"Found {len(cancer_files)} cancer HDF5 files to process (limit: {cancer_limit})")
     
     # Results container
     results = []
     
-    # Process normal images in parallel
-    logging.info("Processing normal images...")
+    # Process normal files in parallel
+    logging.info("Processing normal HDF5 files...")
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
-        for img_path in normal_files:
-            future = executor.submit(
-                process_single_image, 
-                img_path, 
-                dirs["normal_original"],
-                dirs["normal_adversarial"],
-                results, 
-                PRESET_COLORS, 
-                max_iterations,
-                "normal",
-                remove_originals
-            )
-            futures.append(future)
+        for file_path in normal_files:
+            # For each file, check if specified dataset exists
+            try:
+                with h5py.File(file_path, 'r') as hf:
+                    if normal_dataset in hf:
+                        future = executor.submit(
+                            process_single_hdf5_dataset, 
+                            file_path, 
+                            normal_dataset,
+                            dirs["normal_original"],
+                            dirs["normal_adversarial"],
+                            results, 
+                            PRESET_COLORS, 
+                            max_iterations,
+                            "normal"
+                        )
+                        futures.append(future)
+                    else:
+                        # Try to find any datasets in the file
+                        all_datasets = get_hdf5_datasets(file_path)
+                        if all_datasets:
+                            for ds in all_datasets:
+                                # Check data shape to see if it looks like an image
+                                if len(hf[ds].shape) >= 2:
+                                    future = executor.submit(
+                                        process_single_hdf5_dataset, 
+                                        file_path, 
+                                        ds,
+                                        dirs["normal_original"],
+                                        dirs["normal_adversarial"],
+                                        results, 
+                                        PRESET_COLORS, 
+                                        max_iterations,
+                                        "normal"
+                                    )
+                                    futures.append(future)
+                                    break  # Just use the first valid dataset
+                        else:
+                            logging.warning(f"No datasets found in {file_path}")
+            except Exception as e:
+                logging.error(f"Error examining {file_path}: {e}")
         
         # Show progress
-        for _ in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processing normal images"):
+        for _ in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processing normal HDF5 files"):
             pass
     
-    # Process cancer images in parallel
-    logging.info("Processing cancer images...")
+    # Process cancer files in parallel
+    logging.info("Processing cancer HDF5 files...")
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
-        for img_path in cancer_files:
-            future = executor.submit(
-                process_single_image, 
-                img_path, 
-                dirs["cancer_original"],
-                dirs["cancer_adversarial"],
-                results, 
-                PRESET_COLORS, 
-                max_iterations,
-                "cancer",
-                remove_originals
-            )
-            futures.append(future)
+        for file_path in cancer_files:
+            # For each file, check if specified dataset exists
+            try:
+                with h5py.File(file_path, 'r') as hf:
+                    if cancer_dataset in hf:
+                        future = executor.submit(
+                            process_single_hdf5_dataset, 
+                            file_path, 
+                            cancer_dataset,
+                            dirs["cancer_original"],
+                            dirs["cancer_adversarial"],
+                            results, 
+                            PRESET_COLORS, 
+                            max_iterations,
+                            "cancer"
+                        )
+                        futures.append(future)
+                    else:
+                        # Try to find any datasets in the file
+                        all_datasets = get_hdf5_datasets(file_path)
+                        if all_datasets:
+                            for ds in all_datasets:
+                                # Check data shape to see if it looks like an image
+                                if len(hf[ds].shape) >= 2:
+                                    future = executor.submit(
+                                        process_single_hdf5_dataset, 
+                                        file_path, 
+                                        ds,
+                                        dirs["cancer_original"],
+                                        dirs["cancer_adversarial"],
+                                        results, 
+                                        PRESET_COLORS, 
+                                        max_iterations,
+                                        "cancer"
+                                    )
+                                    futures.append(future)
+                                    break  # Just use the first valid dataset
+                        else:
+                            logging.warning(f"No datasets found in {file_path}")
+            except Exception as e:
+                logging.error(f"Error examining {file_path}: {e}")
         
         # Show progress
-        for _ in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processing cancer images"):
+        for _ in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processing cancer HDF5 files"):
             pass
     
     # Save all results to CSV
     results_df = pd.DataFrame(results)
-    results_path = os.path.join(dirs["results"], "all_attack_results.csv")
-    results_df.to_csv(results_path, index=False)
+    if not results_df.empty:
+        results_path = os.path.join(dirs["results"], "all_attack_results.csv")
+        results_df.to_csv(results_path, index=False)
+        
+        # Split results by type and save separately
+        normal_results = results_df[results_df["type"] == "normal"]
+        cancer_results = results_df[results_df["type"] == "cancer"]
+        
+        normal_results.to_csv(os.path.join(dirs["results"], "normal_attack_results.csv"), index=False)
+        cancer_results.to_csv(os.path.join(dirs["results"], "cancer_attack_results.csv"), index=False)
+        
+        # Generate summary statistics for each type
+        normal_summary = {
+            "type": "normal",
+            "total_datasets": len(normal_results),
+            "avg_original_prob": normal_results["original_probability"].mean(),
+            "avg_new_prob": normal_results["new_probability"].mean(),
+            "avg_difference": normal_results["difference"].mean(),
+            "max_difference": normal_results["difference"].max(),
+            "success_rate": (normal_results["difference"] > 0).mean() * 100,
+            "avg_attack_time": normal_results["attack_time"].mean()
+        }
+        
+        cancer_summary = {
+            "type": "cancer",
+            "total_datasets": len(cancer_results),
+            "avg_original_prob": cancer_results["original_probability"].mean(),
+            "avg_new_prob": cancer_results["new_probability"].mean(),
+            "avg_difference": cancer_results["difference"].mean(),
+            "max_difference": cancer_results["difference"].max(),
+            "success_rate": (cancer_results["difference"] > 0).mean() * 100,
+            "avg_attack_time": cancer_results["attack_time"].mean()
+        }
+        
+        # Save summary
+        summary_df = pd.DataFrame([normal_summary, cancer_summary])
+        summary_path = os.path.join(dirs["results"], "attack_summary.csv")
+        summary_df.to_csv(summary_path, index=False)
+        
+        logging.info(f"Batch processing complete. Results saved to {dirs['results']}")
+        logging.info(f"Normal success rate: {normal_summary['success_rate']:.2f}%")
+        logging.info(f"Cancer success rate: {cancer_summary['success_rate']:.2f}%")
+    else:
+        logging.warning("No results were generated. Check input files and dataset names.")
     
-    # Split results by type and save separately
-    normal_results = results_df[results_df["type"] == "normal"]
-    cancer_results = results_df[results_df["type"] == "cancer"]
-    
-    normal_results.to_csv(os.path.join(dirs["results"], "normal_attack_results.csv"), index=False)
-    cancer_results.to_csv(os.path.join(dirs["results"], "cancer_attack_results.csv"), index=False)
-    
-    # Generate summary statistics for each type
-    normal_summary = {
-        "type": "normal",
-        "total_images": len(normal_results),
-        "avg_original_prob": normal_results["original_probability"].mean(),
-        "avg_new_prob": normal_results["new_probability"].mean(),
-        "avg_difference": normal_results["difference"].mean(),
-        "max_difference": normal_results["difference"].max(),
-        "success_rate": (normal_results["difference"] > 0).mean() * 100,
-        "avg_attack_time": normal_results["attack_time"].mean()
-    }
-    
-    cancer_summary = {
-        "type": "cancer",
-        "total_images": len(cancer_results),
-        "avg_original_prob": cancer_results["original_probability"].mean(),
-        "avg_new_prob": cancer_results["new_probability"].mean(),
-        "avg_difference": cancer_results["difference"].mean(),
-        "max_difference": cancer_results["difference"].max(),
-        "success_rate": (cancer_results["difference"] > 0).mean() * 100,
-        "avg_attack_time": cancer_results["attack_time"].mean()
-    }
-    
-    # Save summary
-    summary_df = pd.DataFrame([normal_summary, cancer_summary])
-    summary_path = os.path.join(dirs["results"], "attack_summary.csv")
-    summary_df.to_csv(summary_path, index=False)
-    
-    logging.info(f"Batch processing complete. Results saved to {dirs['results']}")
-    logging.info(f"Normal success rate: {normal_summary['success_rate']:.2f}%")
-    logging.info(f"Cancer success rate: {cancer_summary['success_rate']:.2f}%")
-    
-    return results_df, summary_df, dirs
+    return results_df if not results_df.empty else pd.DataFrame(), summary_df if 'summary_df' in locals() else pd.DataFrame(), dirs
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Batch One-Pixel Attack for Normal and Cancer Images')
-    parser.add_argument('--normal_input', type=str, required=True, help='Input directory containing normal images')
-    parser.add_argument('--cancer_input', type=str, required=True, help='Input directory containing cancer images')
+    parser = argparse.ArgumentParser(description='Batch One-Pixel Attack for HDF5 Files')
+    parser.add_argument('--normal_input', type=str, required=True, help='Input directory containing normal HDF5 files')
+    parser.add_argument('--cancer_input', type=str, required=True, help='Input directory containing cancer HDF5 files')
     parser.add_argument('--output', type=str, required=True, help='Base output directory for all results')
-    parser.add_argument('--normal_limit', type=int, default=1, help='Number of normal images to process')
-    parser.add_argument('--cancer_limit', type=int, default=1, help='Number of cancer images to process')
+    parser.add_argument('--normal_limit', type=int, default=1, help='Number of normal HDF5 files to process')
+    parser.add_argument('--cancer_limit', type=int, default=1, help='Number of cancer HDF5 files to process')
     parser.add_argument('--workers', type=int, default=8, help='Number of parallel workers')
     parser.add_argument('--iterations', type=int, default=100, help='Max iterations for differential evolution')
     parser.add_argument('--model_path', type=str, default=MODEL_PATH, help='Path to the H5 model file')
-    parser.add_argument('--keep_originals', action='store_true', help='Do not delete original images after processing')
+    parser.add_argument('--normal_dataset', type=str, default='data', help='Dataset name in normal HDF5 files')
+    parser.add_argument('--cancer_dataset', type=str, default='data', help='Dataset name in cancer HDF5 files')
     
     args = parser.parse_args()
     
@@ -365,7 +435,7 @@ if __name__ == "__main__":
         exit(1)
     
     start_time = time.time()
-    results_df, summary_df, output_dirs = batch_process_images(
+    results_df, summary_df, output_dirs = batch_process_hdf5(
         args.normal_input, 
         args.cancer_input,
         args.output, 
@@ -373,21 +443,23 @@ if __name__ == "__main__":
         cancer_limit=args.cancer_limit,
         max_workers=args.workers,
         max_iterations=args.iterations,
-        remove_originals=not args.keep_originals  # Remove originals by default unless --keep_originals is specified
+        normal_dataset=args.normal_dataset,
+        cancer_dataset=args.cancer_dataset
     )
     total_time = time.time() - start_time
     
-    # Print summary for each type
-    for _, row in summary_df.iterrows():
-        img_type = row['type']
-        print(f"\n{img_type.capitalize()} Images Summary:")
-        print(f"Total images processed: {row['total_images']}")
-        print(f"Average original probability: {row['avg_original_prob']:.4f}")
-        print(f"Average new probability: {row['avg_new_prob']:.4f}")
-        print(f"Average difference: {row['avg_difference']:.4f}")
-        print(f"Maximum difference: {row['max_difference']:.4f}")
-        print(f"Success rate: {row['success_rate']:.2f}%")
-        print(f"Average attack time per image: {row['avg_attack_time']:.2f} seconds")
+    # Print summary for each type if results exist
+    if not summary_df.empty:
+        for _, row in summary_df.iterrows():
+            data_type = row['type']
+            print(f"\n{data_type.capitalize()} Datasets Summary:")
+            print(f"Total datasets processed: {row['total_datasets']}")
+            print(f"Average original probability: {row['avg_original_prob']:.4f}")
+            print(f"Average new probability: {row['avg_new_prob']:.4f}")
+            print(f"Average difference: {row['avg_difference']:.4f}")
+            print(f"Maximum difference: {row['max_difference']:.4f}")
+            print(f"Success rate: {row['success_rate']:.2f}%")
+            print(f"Average attack time per dataset: {row['avg_attack_time']:.2f} seconds")
     
     print(f"\nTotal execution time: {total_time:.2f} seconds")
     print(f"\nFiles saved to:")
