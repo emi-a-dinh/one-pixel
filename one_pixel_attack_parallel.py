@@ -1,4 +1,3 @@
-import requests
 import numpy as np
 from cv2 import imread, imwrite
 from scipy.optimize import differential_evolution
@@ -12,6 +11,7 @@ import time
 from tqdm import tqdm
 import logging
 import shutil
+import tensorflow as tf
 
 # Configure logging
 logging.basicConfig(
@@ -23,32 +23,62 @@ logging.basicConfig(
     ]
 )
 
-MODEL = "http://0.0.0.0:5000/model/predict"
+MODEL_PATH = "model.h5"  # Default path to the H5 model file
 PRESET_COLORS = [[0, 0, 0], [255, 255, 255], [255, 255, 0]]  # based on research
+model = None  # Will be loaded globally
 
-def call_model(image_array):
-    """Send image to the model API and get predictions"""
+def load_model(model_path):
+    """Load the H5 model file"""
+    global model
     try:
-        # Convert numpy array to bytes
+        model = tf.keras.models.load_model(model_path)
+        logging.info(f"Successfully loaded model from {model_path}")
+        return True
+    except Exception as e:
+        logging.error(f"Failed to load model: {e}")
+        return False
+
+def preprocess_image(image_array):
+    """Preprocess image for model input"""
+    try:
+        # Convert to PIL image
         img_pil = Image.fromarray(np.uint8(image_array))
         
         # Ensure 64x64 size
         if img_pil.size != (64, 64):
             img_pil = img_pil.resize((64, 64))
         
-        # Convert to PNG bytes
-        buffer = io.BytesIO()
-        img_pil.save(buffer, format='PNG')
-        buffer.seek(0)
+        # Convert to numpy array and normalize
+        img_array = np.array(img_pil) / 255.0
         
-        # Send to API
-        files = {'image': ('image.png', buffer, 'image/png')}
-        response = requests.post(MODEL, files=files, timeout=10)
+        # Add batch dimension
+        img_array = np.expand_dims(img_array, axis=0)
         
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        logging.error(f"API request failed: {e}")
-        return {"predictions": [{"probability": 0}]}  # Default value on failure
+        return img_array
+    except Exception as e:
+        logging.error(f"Error in preprocess_image: {e}")
+        return None
+
+def call_model(image_array):
+    """Use the loaded model to get predictions"""
+    try:
+        # Ensure model is loaded
+        if model is None:
+            logging.error("Model not loaded. Call load_model first.")
+            return {"predictions": [{"probability": 0}]}
+        
+        # Preprocess image
+        preprocessed = preprocess_image(image_array)
+        if preprocessed is None:
+            return {"predictions": [{"probability": 0}]}
+        
+        # Get prediction
+        predictions = model.predict(preprocessed, verbose=0)
+        
+        # Format output to match the original API response format
+        probability = float(predictions[0][0])  # Assuming binary classification with cancer probability at index 0
+        
+        return {"predictions": [{"probability": probability}]}
     except Exception as e:
         logging.error(f"Error in call_model: {e}")
         return {"predictions": [{"probability": 0}]}
@@ -116,7 +146,8 @@ def produce_altered_image(image, pixel):
     return altered_image
 
 def process_single_image(image_path, original_dir, adversarial_dir, results_list, 
-                         preset_colors=PRESET_COLORS, max_iter=100, image_type="normal"):
+                         preset_colors=PRESET_COLORS, max_iter=100, image_type="normal",
+                         remove_original=True):
     """Process a single image for pixel attack"""
     try:
         # Extract filename
@@ -151,6 +182,14 @@ def process_single_image(image_path, original_dir, adversarial_dir, results_list
         # Save altered image to adversarial directory
         adversarial_output_path = os.path.join(adversarial_dir, filename)
         imwrite(adversarial_output_path, altered)
+        
+        # Remove original image from input directory
+        if remove_original:
+            try:
+                os.remove(image_path)
+                logging.info(f"Removed original image: {image_path}")
+            except Exception as e:
+                logging.error(f"Failed to remove original image {image_path}: {e}")
         
         # Store results
         x, y, b, g, r = optimal_pixel
@@ -194,7 +233,8 @@ def setup_directories(base_output_dir):
 
 def batch_process_images(normal_input_dir, cancer_input_dir, output_dir, 
                          normal_limit=20000, cancer_limit=1000, 
-                         max_workers=8, max_iterations=100):
+                         max_workers=8, max_iterations=100,
+                         remove_originals=True):
     """Process normal and cancer images separately with specified limits"""
     
     # Setup directory structure
@@ -228,7 +268,8 @@ def batch_process_images(normal_input_dir, cancer_input_dir, output_dir,
                 results, 
                 PRESET_COLORS, 
                 max_iterations,
-                "normal"
+                "normal",
+                remove_originals
             )
             futures.append(future)
         
@@ -249,7 +290,8 @@ def batch_process_images(normal_input_dir, cancer_input_dir, output_dir,
                 results, 
                 PRESET_COLORS, 
                 max_iterations,
-                "cancer"
+                "cancer",
+                remove_originals
             )
             futures.append(future)
         
@@ -308,16 +350,19 @@ if __name__ == "__main__":
     parser.add_argument('--normal_input', type=str, required=True, help='Input directory containing normal images')
     parser.add_argument('--cancer_input', type=str, required=True, help='Input directory containing cancer images')
     parser.add_argument('--output', type=str, required=True, help='Base output directory for all results')
-    parser.add_argument('--normal_limit', type=int, default=20000, help='Number of normal images to process')
-    parser.add_argument('--cancer_limit', type=int, default=1000, help='Number of cancer images to process')
+    parser.add_argument('--normal_limit', type=int, default=1, help='Number of normal images to process')
+    parser.add_argument('--cancer_limit', type=int, default=1, help='Number of cancer images to process')
     parser.add_argument('--workers', type=int, default=8, help='Number of parallel workers')
     parser.add_argument('--iterations', type=int, default=100, help='Max iterations for differential evolution')
-    parser.add_argument('--model', type=str, default=None, help='Model endpoint URL (optional)')
+    parser.add_argument('--model_path', type=str, default=MODEL_PATH, help='Path to the H5 model file')
+    parser.add_argument('--keep_originals', action='store_true', help='Do not delete original images after processing')
     
     args = parser.parse_args()
     
-    if args.model:
-        MODEL = args.model
+    # Load the model
+    if not load_model(args.model_path):
+        logging.error(f"Failed to load model from {args.model_path}. Exiting.")
+        exit(1)
     
     start_time = time.time()
     results_df, summary_df, output_dirs = batch_process_images(
@@ -327,7 +372,8 @@ if __name__ == "__main__":
         normal_limit=args.normal_limit,
         cancer_limit=args.cancer_limit,
         max_workers=args.workers,
-        max_iterations=args.iterations
+        max_iterations=args.iterations,
+        remove_originals=not args.keep_originals  # Remove originals by default unless --keep_originals is specified
     )
     total_time = time.time() - start_time
     

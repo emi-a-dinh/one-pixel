@@ -10,19 +10,16 @@ MODEL = "http://0.0.0.0:5000/model/predict"
 
 
 def call_model(image_array):
-    # Convert numpy array to bytes
+  
     img_pil = Image.fromarray(np.uint8(image_array))
-    
-    # Ensure 64x64 size
+ 
     if img_pil.size != (64, 64):
         img_pil = img_pil.resize((64, 64))
     
-    # Convert to PNG bytes
     buffer = io.BytesIO()
     img_pil.save(buffer, format='PNG')
     buffer.seek(0)
     
-    # Send to API
     files = {'image': ('image.png', buffer, 'image/png')}
     response = requests.post(MODEL, files=files)
     
@@ -34,11 +31,10 @@ def one_pixel_attack(image, preset_colors, max_iter=100):
         img_copy = image.copy()
         x, y, color_idx = int(params[0]), int(params[1]), int(params[2])
         r, g, b = preset_colors[color_idx % len(preset_colors)]
-        img_copy[y, x] = [b, g, r]  # OpenCV uses BGR order
+        img_copy[y, x] = [b, g, r]  
         
-        # Access the correct key path in the response
         response = call_model(img_copy)
-        return response["predictions"][0]["probability"]  # Negative because we're minimizing
+        return -response["predictions"][0]["probability"]  
 
     bounds = [(0, 64), (0, 64), (0, len(preset_colors)-0.001)]
     result = differential_evolution(perturbation, bounds, maxiter=max_iter)
