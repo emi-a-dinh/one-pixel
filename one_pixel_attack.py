@@ -11,7 +11,9 @@ import sys
 import cv2
 import tempfile
 import io
-from vis.visualization import visualize_saliency
+from tf_keras_vis.saliency import Saliency
+from tf_keras_vis.utils.model_modifiers import ReplaceToLinear
+from tf_keras_vis.utils.scores import CategoricalScore
 
 #upgraded tensor flow from 1.15.4 to 2.07
 
@@ -71,16 +73,26 @@ def call_model(image_array):
 
 
 
-def get_important_pixels(image, num_pixels=10):
+def get_important_pixels(image, num_pixels=1):
     """Finds the top `num_pixels` pixels that contribute the most to the model’s decision."""
-    img_np = np.array(image) / 255.0
-    img_np = np.expand_dims(img_np, axis=0)
     
+    # Ensure input is properly formatted
+    img_np = np.array(image) / 255.0  # Normalize image
+    img_np = np.expand_dims(img_np, axis=0)  # Add batch dimension
+
+    # Define loss function to maximize the predicted class
+    def loss_function(output):
+        return output[:, 0]  # Use the first class probability
+
+    # Initialize Saliency object with a model modifier
+    saliency = Saliency(model, model_modifier=ReplaceToLinear(), clone=False)
+
     # Compute saliency map
-    grads = visualize_saliency(model, layer_idx=-1, filter_indices=0, seed_input=img_np)
-    
+    saliency_map = saliency(loss_function, img_np)
+
     # Find the `num_pixels` highest gradient pixels
-    indices = np.dstack(np.unravel_index(np.argsort(grads.ravel())[-num_pixels:], grads.shape))
+    indices = np.dstack(np.unravel_index(np.argsort(saliency_map.ravel())[-num_pixels:], saliency_map.shape))
+    
     return indices.squeeze()
 
 
