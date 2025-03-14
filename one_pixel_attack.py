@@ -7,6 +7,7 @@ from PIL import Image
 from tensorflow.keras.models import model_from_json
 import io
 import requests
+import sys
 
 #upgraded tensor flow from 1.15.4 to 2.07
 
@@ -156,7 +157,7 @@ def produce_altered_image(image, pixel):
     return altered_image
 
 
-path = "1_02_21_1791_131_0_-14_-14_4.png"
+path = sys.argv[1]
 image = imread(path)
 original = call_model(image)
 print("Original Prediction:", original)
