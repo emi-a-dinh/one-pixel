@@ -98,7 +98,7 @@ def produce_altered_image(image, pixel):
     return altered_image
 
 
-path = "1_01_01_0_0_0_0_0_.png"
+path = "1_02_21_1791_131_0_-14_-14_4.png"
 image = imread(path)
 original = call_model(image)
 print("Original Prediction:", original)
