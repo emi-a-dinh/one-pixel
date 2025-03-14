@@ -8,10 +8,17 @@ from PIL import Image
 
 MODEL_PATH = "0.29452_f1max_0.14705_f1_0.78622_loss_0_epoch_model.hdf5"  # Path to your HDF5 model file
 
-# Load the model once to avoid repeated disk reads
-model = tf.keras.models.load_model(MODEL_PATH)
+def load_keras_model(h5_path):
+    """Loads a Keras model safely from an HDF5 file."""
+    with h5py.File(h5_path, 'r') as f:
+        model_config = f.attrs['model_config']
+        if isinstance(model_config, bytes):  # Old TensorFlow format
+            model_config = model_config.decode('utf-8')
+        model = model_from_json(model_config)  # Load model architecture
+        model.load_weights(h5_path)  # Load weights
+    return model
 
-
+model = load_keras_model(MODEL_PATH)
 def call_model(image_array):
     """Runs the local HDF5 model on the input image."""
     img_pil = Image.fromarray(np.uint8(image_array))
