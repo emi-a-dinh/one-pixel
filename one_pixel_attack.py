@@ -6,6 +6,7 @@ from scipy.optimize import differential_evolution
 from PIL import Image
 from tensorflow.keras.models import model_from_json
 import io
+import requests
 
 #upgraded tensor flow from 1.15.4 to 2.07
 
