@@ -71,15 +71,23 @@ def one_pixel_attackapi(image_path, preset_colors, max_iter=100):
     def perturbation(params):
         x, y, color_idx = int(params[0]), int(params[1]), int(params[2])
         r, g, b = preset_colors[color_idx % len(preset_colors)]
-        
+
         # Make a copy and apply the perturbation
         img_copy = image.copy()
         img_copy[y, x] = [b, g, r]  # OpenCV uses BGR format
 
         # Save perturbed image to a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_img:
-            temp_path = temp_img.name
-            cv2.imwrite(temp_path, img_copy)
+        temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        temp_path = temp_img.name
+        temp_img.close()  # Close so OpenCV can write to it
+        cv2.imwrite(temp_path, img_copy)
+
+        print(f"Temporary image saved at: {temp_path}")  # Debugging output
+
+        # Check if the file exists before calling API
+        if not os.path.isfile(temp_path):
+            print(f"Error: Temporary file {temp_path} does not exist!")
+            return float("inf")  # Return a high cost if image is not valid
 
         # Call the model API with the new image
         response = call_modelapi(temp_path)
