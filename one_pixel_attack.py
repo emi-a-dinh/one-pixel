@@ -44,22 +44,12 @@ model.load_weights(MODEL_PATH)
 MODELAPI = "http://0.0.0.0:5000/model/predict"
 
 
-def call_modelapi(image_array):
-  
-    img_pil = Image.fromarray(np.uint8(image_array))
- 
-    if img_pil.size != (64, 64):
-        img_pil = img_pil.resize((64, 64))
+def call_modelapi(image_path):
+    with open(image_path, "rb") as img_file:
+        files = {"image": (image_path, img_file, "image/png")}
+        response = requests.post(MODELAPI, files=files)
     
-    buffer = io.BytesIO()
-    img_pil.save(buffer, format='PNG')
-    buffer.seek(0)
-    
-    files = {'image': ('image.png', buffer, 'image/png')}
-    response = requests.post(MODELAPI, files=files)
-    
-    return response.json()
-
+    return response.json()  # Assuming response is JSON
 
 def one_pixel_attackapi(image, preset_colors, max_iter=100):
     def perturbation(params):
@@ -174,8 +164,8 @@ print("API result: ", api)
 # new_prediction = call_model(altered)
 # print("Differential Evolution Prediction:", new_prediction)
 
-fgsm_image = fgsm_attack(image)
-fgsm_prediction = call_model(fgsm_image)
-print("New Prediction (after FGSM attack):", fgsm_prediction)
-# imwrite("altered_image1.png", altered)
+# fgsm_image = fgsm_attack(image)
+# fgsm_prediction = call_model(fgsm_image)
+# print("New Prediction (after FGSM attack):", fgsm_prediction)
+# # imwrite("altered_image1.png", altered)
 
