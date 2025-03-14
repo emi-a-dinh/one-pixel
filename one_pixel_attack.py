@@ -105,12 +105,12 @@ print("Original Prediction:", original)
 
 preset_colors = [[0, 0, 0], [255, 255, 255], [255, 255, 0]]  # Based on research
 
-optimal_pixel = one_pixel_attack(image, preset_colors)
-print("Optimal Pixel:", optimal_pixel)
+# optimal_pixel = one_pixel_attack(image, preset_colors)
+# print("Optimal Pixel:", optimal_pixel)
 
-altered = produce_altered_image(image, optimal_pixel)
-new_prediction = call_model(altered)
-print("Differential Evolution Prediction:", new_prediction)
+# altered = produce_altered_image(image, optimal_pixel)
+# new_prediction = call_model(altered)
+# print("Differential Evolution Prediction:", new_prediction)
 
 fgsm_image = fgsm_attack(image)
 fgsm_prediction = call_model(fgsm_image)
