@@ -52,24 +52,29 @@ model.summary()
 
 
 def call_model(image_array):
-    """Runs the local HDF5 model on the input image."""
+    """Runs the model and ensures it outputs a probability."""
+    
+    # Convert the image array into the correct format
     img_pil = Image.fromarray(np.uint8(image_array))
 
     if img_pil.size != (64, 64):
         img_pil = img_pil.resize((64, 64))
 
-    img_np = np.array(img_pil) / 255.0  # Normalize pixel values
-    img_np = np.expand_dims(img_np, axis=0)  # Add batch dimension
+    buffer = io.BytesIO()
+    img_pil.save(buffer, format='PNG')
+    buffer.seek(0)
 
-    predictions = model.predict(img_np)
+    # Send the image to the API
+    files = {'image': ('image.png', buffer, 'image/png')}
+    response = requests.post(MODEL, files=files)
+    
+    # Extract the raw model output (logits)
+    raw_output = response.json()["predictions"][0]["probability"]
 
-    # Apply correct activation function based on model type
-    if predictions.shape[-1] == 1:  # Binary classification (single output neuron)
-        probability = tf.nn.sigmoid(predictions).numpy()[0][0]
-    else:  # Multi-class classification (more than 1 output neuron)
-        probability = tf.nn.softmax(predictions).numpy()[0].tolist()
+    # Convert logits to probabilities using Sigmoid
+    probability = float(tf.nn.sigmoid(raw_output).numpy())
 
-    return {"predictions": [{"probability": float(probability)}]}
+    return {"predictions": [{"probability": probability}]}
 
 
 
