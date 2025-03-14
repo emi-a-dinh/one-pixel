@@ -10,6 +10,14 @@ from tqdm import tqdm
 import logging
 import tensorflow as tf
 
+#python hdf5_one_pixel_attack.py --normal_input /path/to/normal/hdf5s/ 
+# --cancer_input /path/to/cancer/hdf5s/ --output /path/to/output/ 
+# --model_path your_model.hdf5 --normal_dataset data --cancer_dataset data
+
+# python hdf5_one_pixel_attack.py --normal_input /path/to/normal/hdf5s/
+# --cancer_input /path/to/cancer/hdf5s/ --output /path/to/output/
+# --normal_dataset images --cancer_dataset images
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
