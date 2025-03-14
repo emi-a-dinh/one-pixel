@@ -154,15 +154,25 @@ def targeted_one_pixel(image, important_pixels, max_iter=300):
 
 
 def fgsm_attack(image, target_label=None, epsilon=0.2):
-    """Performs a fast gradient sign method (FGSM) attack using direct backpropagation."""
+    """Performs a fast gradient sign method (FGSM) attack using backpropagation."""
 
-    image = image.astype(np.float32) / 255.0  # Normalize image to [0,1]
+    # Normalize image to [0,1]
+    image = image.astype(np.float32) / 255.0
     img_tensor = tf.convert_to_tensor(image[None, ...], dtype=tf.float32)  # Add batch dimension
 
     with tf.GradientTape() as tape:
         tape.watch(img_tensor)
         prediction = model(img_tensor)  # Forward pass
-        loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=[[target_label]], logits=prediction)
+
+        # If no target_label is provided, assume untargeted attack (push away from current prediction)
+        if target_label is None:
+            target_label = tf.round(tf.nn.sigmoid(prediction))  # Get the current predicted class (0 or 1)
+
+        # Ensure target_label is a TensorFlow tensor
+        target_label_tensor = tf.convert_to_tensor([[target_label]], dtype=tf.float32)
+
+        # Compute loss
+        loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=target_label_tensor, logits=prediction)
 
     # Compute gradients
     gradient = tape.gradient(loss, img_tensor)
