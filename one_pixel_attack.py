@@ -46,18 +46,41 @@ model.load_weights(MODEL_PATH)
 
 MODELAPI = "http://0.0.0.0:5000/model/predict"
 
+def call_modelapi(image_array):
+    """Sends an image array to the API and returns the prediction."""
+    if not isinstance(image_array, np.ndarray):
+        raise ValueError("Invalid input: Provide a valid NumPy image array.")
 
-def call_modelapi(image_path):
-    # Ensure the input is a valid file path
-    if not isinstance(image_path, str) or not os.path.isfile(image_path):
-        raise ValueError("Invalid input: Provide a valid image file path.")
+    # Convert NumPy array to PIL Image
+    img_pil = Image.fromarray(np.uint8(image_array))
 
-    # Open the image file in binary mode and send it
-    with open(image_path, "rb") as img_file:
-        files = {"image": (image_path, img_file, "image/png")}
-        response = requests.post(MODELAPI, files=files)
+    # Resize to match model input size (if needed)
+    if img_pil.size != (64, 64):
+        img_pil = img_pil.resize((64, 64))
+
+    # Convert image to bytes
+    buffer = io.BytesIO()
+    img_pil.save(buffer, format="PNG")
+    buffer.seek(0)
+
+    # Send the image directly as a binary file
+    files = {"image": ("image.png", buffer, "image/png")}
+    response = requests.post(MODELAPI, files=files)
+
+    return response.json()
+
+
+# def call_modelapi(image_path):
+#     # Ensure the input is a valid file path
+#     if not isinstance(image_path, str) or not os.path.isfile(image_path):
+#         raise ValueError("Invalid input: Provide a valid image file path.")
+
+#     # Open the image file in binary mode and send it
+#     with open(image_path, "rb") as img_file:
+#         files = {"image": (image_path, img_file, "image/png")}
+#         response = requests.post(MODELAPI, files=files)
     
-    return response.json()  # Return the JSON response
+#     return response.json()  # Return the JSON response
 
 
 def one_pixel_attackapi(image_path, preset_colors, max_iter=100):
@@ -111,21 +134,6 @@ def one_pixel_attackapi(image_path, preset_colors, max_iter=100):
     r, g, b = preset_colors[color_idx % len(preset_colors)]
 
     return [x, y, r, g, b]
-
-# def load_keras_model(h5_path):
-#     """Loads a Keras model safely from an HDF5 file."""
-#     with h5py.File(h5_path, 'r') as f:
-#         model_config = f.attrs['model_config']
-#         if isinstance(model_config, bytes):  # Old TensorFlow format
-#             model_config = model_config.decode('utf-8')
-#         model = model_from_json(model_config)  # Load model architecture
-#         model.load_weights(h5_path)  # Load weights
-#     return model
-
-# # Load the model
-# model = load_keras_model(MODEL_PATH)
-
-
 
 def call_model(image_array):
     """Runs the local HDF5 model on the input image."""
@@ -227,7 +235,7 @@ print("Original Prediction:", original)
 
 preset_colors = [[0, 0, 0], [255, 255, 255], [255, 255, 0]]  # Based on research
 
-api = call_modelapi(path)
+api = call_modelapi(image)
 print("API result: ", api)
 
 
