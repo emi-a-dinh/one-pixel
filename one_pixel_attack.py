@@ -153,6 +153,7 @@ def targeted_one_pixel(image, important_pixels, max_iter=300):
 
 
 
+
 def fgsm_attack(image, target_label=None, epsilon=0.2):
     """Performs a fast gradient sign method (FGSM) attack using backpropagation."""
 
@@ -168,8 +169,9 @@ def fgsm_attack(image, target_label=None, epsilon=0.2):
         if target_label is None:
             target_label = tf.round(tf.nn.sigmoid(prediction))  # Get the current predicted class (0 or 1)
 
-        # Ensure target_label is a TensorFlow tensor
-        target_label_tensor = tf.convert_to_tensor([[target_label]], dtype=tf.float32)
+        # Ensure target_label is a TensorFlow tensor and reshape it to match logits
+        target_label_tensor = tf.convert_to_tensor(target_label, dtype=tf.float32)
+        target_label_tensor = tf.reshape(target_label_tensor, prediction.shape)  # Ensure same shape
 
         # Compute loss
         loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=target_label_tensor, logits=prediction)
@@ -183,7 +185,6 @@ def fgsm_attack(image, target_label=None, epsilon=0.2):
     adversarial_image = tf.clip_by_value(adversarial_image, 0, 1).numpy()[0] * 255  # Convert back to [0,255]
 
     return adversarial_image.astype(np.uint8)
-
 
 
 def produce_altered_image(image, pixel):
