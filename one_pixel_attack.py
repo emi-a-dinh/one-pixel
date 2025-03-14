@@ -4,6 +4,7 @@ import tensorflow as tf
 from cv2 import imread, imwrite
 from scipy.optimize import differential_evolution
 from PIL import Image
+from tensorflow.keras.models import model_from_json
 
 
 MODEL_PATH = "0.29452_f1max_0.14705_f1_0.78622_loss_0_epoch_model.hdf5"  # Path to your HDF5 model file
@@ -19,6 +20,7 @@ def load_keras_model(h5_path):
     return model
 
 model = load_keras_model(MODEL_PATH)
+
 def call_model(image_array):
     """Runs the local HDF5 model on the input image."""
     img_pil = Image.fromarray(np.uint8(image_array))
