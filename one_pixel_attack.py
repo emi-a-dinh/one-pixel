@@ -58,7 +58,7 @@ def call_modelapi(image_array):
     buffer.seek(0)
     
     files = {'image': ('image.png', buffer, 'image/png')}
-    response = requests.post(MODEL, files=files)
+    response = requests.post(MODELAPI, files=files)
     
     return response.json()
 
