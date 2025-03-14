@@ -45,11 +45,16 @@ MODELAPI = "http://0.0.0.0:5000/model/predict"
 
 
 def call_modelapi(image_path):
+    # Ensure the input is a valid file path
+    if not isinstance(image_path, str) or not os.path.isfile(image_path):
+        raise ValueError("Invalid input: Provide a valid image file path.")
+
+    # Open the image file in binary mode and send it
     with open(image_path, "rb") as img_file:
         files = {"image": (image_path, img_file, "image/png")}
         response = requests.post(MODELAPI, files=files)
     
-    return response.json()  # Assuming response is JSON
+    return response.json()  # Return the JSON response
 
 def one_pixel_attackapi(image, preset_colors, max_iter=100):
     def perturbation(params):
@@ -154,7 +159,7 @@ print("Original Prediction:", original)
 
 preset_colors = [[0, 0, 0], [255, 255, 255], [255, 255, 0]]  # Based on research
 
-api = call_modelapi(image)
+api = call_modelapi(path)
 print("API result: ", api)
 
 # optimal_pixel = one_pixel_attack(image, preset_colors)
