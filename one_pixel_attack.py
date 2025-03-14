@@ -64,8 +64,14 @@ def call_model(image_array):
     img_np = np.expand_dims(img_np, axis=0)  # Add batch dimension
 
     predictions = model.predict(img_np)
-    return {"predictions": [{"probability": float(predictions[0][0])}]}  # Assuming binary classification
 
+    # Apply correct activation function based on model type
+    if predictions.shape[-1] == 1:  # Binary classification (single output neuron)
+        probability = tf.nn.sigmoid(predictions).numpy()[0][0]
+    else:  # Multi-class classification (more than 1 output neuron)
+        probability = tf.nn.softmax(predictions).numpy()[0].tolist()
+
+    return {"predictions": [{"probability": float(probability)}]}
 
 def one_pixel_attack(image, preset_colors, max_iter=100):
     def perturbation(params):
