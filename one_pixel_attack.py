@@ -77,3 +77,5 @@ new_prediction = call_model(altered)
 print("New Prediction:", new_prediction)
 
 imwrite("altered_image1.png", altered)
+
+print(model.summary())
