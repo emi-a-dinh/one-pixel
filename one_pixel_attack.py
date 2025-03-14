@@ -153,24 +153,33 @@ def targeted_one_pixel(image, important_pixels, max_iter=300):
 
 
 
-def fgsm_attack(image, target_label=1, epsilon=0.1):
-    """Performs FGSM attack to push prediction towards `target_label`."""
-    img_tensor = tf.convert_to_tensor(np.expand_dims(image / 255.0, axis=0), dtype=tf.float32)
-
-    with tf.GradientTape() as tape:
-        tape.watch(img_tensor)
-        prediction = model(img_tensor)  # Get model output
-        target = tf.convert_to_tensor([[target_label]], dtype=tf.float32)  # Target label tensor
-        loss = tf.keras.losses.binary_crossentropy(target, prediction)  # Maximize probability of target_label
+def fgsm_attack(image, target_label=0, epsilon=0.2):
+    """Performs FGSM attack using API calls instead of local model gradients."""
     
-    gradient = tape.gradient(loss, img_tensor)  # Compute gradients
-    signed_grad = tf.sign(gradient)  # Get the sign of the gradient
+    image = image.astype(np.float32)  # Convert to float32
+    perturbation = np.zeros_like(image)  # Initialize perturbation array
+    delta = 1e-3  # Small perturbation for finite difference approximation
 
-    adversarial_image = img_tensor + epsilon * signed_grad  # Apply perturbation
-    adversarial_image = tf.clip_by_value(adversarial_image, 0, 1) * 255  # Keep pixel values valid
+    # Compute numerical gradient for each pixel
+    for i in range(image.shape[0]):
+        for j in range(image.shape[1]):
+            for c in range(image.shape[2]):
+                perturbed_image = image.copy()
+                perturbed_image[i, j, c] += delta  # Slightly increase pixel value
 
-    return adversarial_image.numpy().squeeze().astype(np.uint8)
+                original_pred = call_model(image)["predictions"][0]["probability"]
+                perturbed_pred = call_model(perturbed_image)["predictions"][0]["probability"]
 
+                # Compute approximate gradient (finite difference)
+                gradient = (perturbed_pred - original_pred) / delta
+                perturbation[i, j, c] = gradient
+
+    # Apply adversarial perturbation in the direction of the gradient
+    signed_grad = np.sign(perturbation)
+    adversarial_image = image + epsilon * signed_grad  # Modify image
+    adversarial_image = np.clip(adversarial_image, 0, 255).astype(np.uint8)  # Keep valid pixel values
+
+    return adversarial_image
 
 
 
