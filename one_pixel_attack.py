@@ -71,6 +71,23 @@ def one_pixel_attack(image, preset_colors, max_iter=100):
     r, g, b = preset_colors[color_idx % len(preset_colors)]
     return [x, y, r, g, b]
 
+def fgsm_attack(image, epsilon=0.1):
+    """Applies a small adversarial perturbation using the model gradient."""
+    img_tensor = tf.convert_to_tensor(np.expand_dims(image / 255.0, axis=0), dtype=tf.float32)
+    
+    with tf.GradientTape() as tape:
+        tape.watch(img_tensor)
+        prediction = model(img_tensor)
+        loss = -prediction[:, 0]  # Maximize the loss to fool the model
+    
+    gradient = tape.gradient(loss, img_tensor)
+    signed_grad = tf.sign(gradient)
+
+    adversarial_image = img_tensor + epsilon * signed_grad
+    adversarial_image = tf.clip_by_value(adversarial_image, 0, 1) * 255  # Keep pixel values in range
+    
+    return adversarial_image.numpy().squeeze().astype(np.uint8)
+
 
 def produce_altered_image(image, pixel):
     altered_image = image.copy()
@@ -92,7 +109,10 @@ print("Optimal Pixel:", optimal_pixel)
 
 altered = produce_altered_image(image, optimal_pixel)
 new_prediction = call_model(altered)
-print("New Prediction:", new_prediction)
+print("Differential Evolution Prediction:", new_prediction)
 
-imwrite("altered_image1.png", altered)
+fgsm_image = fgsm_attack(image)
+fgsm_prediction = call_model(fgsm_image)
+print("New Prediction (after FGSM attack):", fgsm_prediction)
+# imwrite("altered_image1.png", altered)
 
