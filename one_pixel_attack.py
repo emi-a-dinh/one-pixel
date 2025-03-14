@@ -71,21 +71,22 @@ def one_pixel_attack(image, preset_colors, max_iter=100):
     r, g, b = preset_colors[color_idx % len(preset_colors)]
     return [x, y, r, g, b]
 
-def fgsm_attack(image, epsilon=0.1):
-    """Applies a small adversarial perturbation using the model gradient."""
+def fgsm_attack(image, target_label=1, epsilon=0.1):
+    """Performs FGSM attack to push prediction towards `target_label`."""
     img_tensor = tf.convert_to_tensor(np.expand_dims(image / 255.0, axis=0), dtype=tf.float32)
-    
+
     with tf.GradientTape() as tape:
         tape.watch(img_tensor)
-        prediction = model(img_tensor)
-        loss = -prediction[:, 0]  # Maximize the loss to fool the model
+        prediction = model(img_tensor)  # Get model output
+        target = tf.convert_to_tensor([[target_label]], dtype=tf.float32)  # Target label tensor
+        loss = tf.keras.losses.binary_crossentropy(target, prediction)  # Maximize probability of target_label
     
-    gradient = tape.gradient(loss, img_tensor)
-    signed_grad = tf.sign(gradient)
+    gradient = tape.gradient(loss, img_tensor)  # Compute gradients
+    signed_grad = tf.sign(gradient)  # Get the sign of the gradient
 
-    adversarial_image = img_tensor + epsilon * signed_grad
-    adversarial_image = tf.clip_by_value(adversarial_image, 0, 1) * 255  # Keep pixel values in range
-    
+    adversarial_image = img_tensor + epsilon * signed_grad  # Apply perturbation
+    adversarial_image = tf.clip_by_value(adversarial_image, 0, 1) * 255  # Keep pixel values valid
+
     return adversarial_image.numpy().squeeze().astype(np.uint8)
 
 
