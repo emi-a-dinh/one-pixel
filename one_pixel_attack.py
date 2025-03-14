@@ -52,29 +52,24 @@ model.summary()
 
 
 def call_model(image_array):
-    """Runs the model and ensures it outputs a probability."""
-    
-    # Convert the image array into the correct format
+    """Runs the local HDF5 model on the input image."""
     img_pil = Image.fromarray(np.uint8(image_array))
 
     if img_pil.size != (64, 64):
         img_pil = img_pil.resize((64, 64))
 
-    buffer = io.BytesIO()
-    img_pil.save(buffer, format='PNG')
-    buffer.seek(0)
+    img_np = np.array(img_pil) / 255.0  # Normalize pixel values
+    img_np = np.expand_dims(img_np, axis=0)  # Add batch dimension
 
-    # Send the image to the API
-    files = {'image': ('image.png', buffer, 'image/png')}
-    response = requests.post(MODEL, files=files)
-    
-    # Extract the raw model output (logits)
-    raw_output = response.json()["predictions"][0]["probability"]
+    predictions = model.predict(img_np)
 
-    # Convert logits to probabilities using Sigmoid
-    probability = float(tf.nn.sigmoid(raw_output).numpy())
+    # Apply correct activation function based on model type
+    if predictions.shape[-1] == 1:  # Binary classification (single output neuron)
+        probability = tf.nn.sigmoid(predictions).numpy()[0][0]
+    else:  # Multi-class classification (more than 1 output neuron)
+        probability = tf.nn.softmax(predictions).numpy()[0].tolist()
 
-    return {"predictions": [{"probability": probability}]}
+    return {"predictions": [{"probability": float(probability)}]}
 
 
 
@@ -107,7 +102,7 @@ def get_important_pixels(image, num_pixels=10):
 
 
 def targeted_one_pixel(image, important_pixels, max_iter=300):
-    """Performs an adversarial attack by selecting the best pixel from the top `important_pixels`."""
+    """Performs an adversarial attack modifying only one highly important pixel from the saliency map."""
     
     if important_pixels is None or len(important_pixels) == 0:
         raise ValueError("You must provide at least one important pixel from a saliency map!")
@@ -116,7 +111,7 @@ def targeted_one_pixel(image, important_pixels, max_iter=300):
     best_prob = float('-inf')  # Track the best probability change
     best_adversarial_image = None
 
-    for x, y in important_pixels:  # Iterate through all top 10 important pixels
+    for x, y in important_pixels:  # Iterate through all top pixels
 
         def perturbation(params):
             img_copy = image.copy()
@@ -134,7 +129,7 @@ def targeted_one_pixel(image, important_pixels, max_iter=300):
         bounds = [(0, 255), (0, 255), (0, 255)]
 
         # Run optimization
-        result = differential_evolution(perturbation, bounds, maxiter=max_iter, strategy='best1bin', popsize=20)
+        result = differential_evolution(perturbation, bounds, maxiter=max_iter, strategy='best1bin', popsize=50)
 
         # Apply the optimal perturbation
         adversarial_image = image.copy()
@@ -158,33 +153,26 @@ def targeted_one_pixel(image, important_pixels, max_iter=300):
 
 
 
-def fgsm_attack(image, target_label=0, epsilon=0.2):
-    """Performs FGSM attack using API calls instead of local model gradients."""
-    
-    image = image.astype(np.float32)  # Convert to float32
-    perturbation = np.zeros_like(image)  # Initialize perturbation array
-    delta = 1e-3  # Small perturbation for finite difference approximation
+def fgsm_attack(image, target_label=None, epsilon=0.2):
+    """Performs a fast gradient sign method (FGSM) attack using direct backpropagation."""
 
-    # Compute numerical gradient for each pixel
-    for i in range(image.shape[0]):
-        for j in range(image.shape[1]):
-            for c in range(image.shape[2]):
-                perturbed_image = image.copy()
-                perturbed_image[i, j, c] += delta  # Slightly increase pixel value
+    image = image.astype(np.float32) / 255.0  # Normalize image to [0,1]
+    img_tensor = tf.convert_to_tensor(image[None, ...], dtype=tf.float32)  # Add batch dimension
 
-                original_pred = call_model(image)["predictions"][0]["probability"]
-                perturbed_pred = call_model(perturbed_image)["predictions"][0]["probability"]
+    with tf.GradientTape() as tape:
+        tape.watch(img_tensor)
+        prediction = model(img_tensor)  # Forward pass
+        loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=[[target_label]], logits=prediction)
 
-                # Compute approximate gradient (finite difference)
-                gradient = (perturbed_pred - original_pred) / delta
-                perturbation[i, j, c] = gradient
+    # Compute gradients
+    gradient = tape.gradient(loss, img_tensor)
 
-    # Apply adversarial perturbation in the direction of the gradient
-    signed_grad = np.sign(perturbation)
-    adversarial_image = image + epsilon * signed_grad  # Modify image
-    adversarial_image = np.clip(adversarial_image, 0, 255).astype(np.uint8)  # Keep valid pixel values
+    # Apply the FGSM perturbation
+    signed_grad = tf.sign(gradient)  # Get sign of the gradient
+    adversarial_image = img_tensor + epsilon * signed_grad
+    adversarial_image = tf.clip_by_value(adversarial_image, 0, 1).numpy()[0] * 255  # Convert back to [0,255]
 
-    return adversarial_image
+    return adversarial_image.astype(np.uint8)
 
 
 
