@@ -38,8 +38,6 @@ model = tf.keras.Sequential([
 # Load weights from HDF5
 model.load_weights(MODEL_PATH)
 
-# Check the summary
-model.summary()
 
 
 def call_model(image_array):
@@ -98,4 +96,3 @@ print("New Prediction:", new_prediction)
 
 imwrite("altered_image1.png", altered)
 
-print(model.summary())
