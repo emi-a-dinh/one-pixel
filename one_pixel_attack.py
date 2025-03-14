@@ -38,6 +38,46 @@ MODEL_PATH = "0.29452_f1max_0.14705_f1_0.78622_loss_0_epoch_model.hdf5"  # Path 
 # # Load weights from HDF5
 # model.load_weights(MODEL_PATH)
 
+
+
+
+MODELAPI = "http://0.0.0.0:5000/model/predict"
+
+
+def call_modelapi(image_array):
+  
+    img_pil = Image.fromarray(np.uint8(image_array))
+ 
+    if img_pil.size != (64, 64):
+        img_pil = img_pil.resize((64, 64))
+    
+    buffer = io.BytesIO()
+    img_pil.save(buffer, format='PNG')
+    buffer.seek(0)
+    
+    files = {'image': ('image.png', buffer, 'image/png')}
+    response = requests.post(MODEL, files=files)
+    
+    return response.json()
+
+
+def one_pixel_attackapi(image, preset_colors, max_iter=100):
+    def perturbation(params):
+        img_copy = image.copy()
+        x, y, color_idx = int(params[0]), int(params[1]), int(params[2])
+        r, g, b = preset_colors[color_idx % len(preset_colors)]
+        img_copy[y, x] = [b, g, r]  
+        
+        response = call_model(img_copy)
+        return -response["predictions"][0]["probability"]  
+
+    bounds = [(0, 64), (0, 64), (0, len(preset_colors)-0.001)]
+    result = differential_evolution(perturbation, bounds, maxiter=max_iter)
+
+    x, y, color_idx = int(result.x[0]), int(result.x[1]), int(result.x[2])
+    r, g, b = preset_colors[color_idx % len(preset_colors)]
+    return [x, y, r, g, b]
+
 def load_keras_model(h5_path):
     """Loads a Keras model safely from an HDF5 file."""
     with h5py.File(h5_path, 'r') as f:
@@ -123,6 +163,9 @@ original = call_model(image)
 print("Original Prediction:", original)
 
 preset_colors = [[0, 0, 0], [255, 255, 255], [255, 255, 0]]  # Based on research
+
+api = call_modelapi(image)
+Print("API result: ", api)
 
 # optimal_pixel = one_pixel_attack(image, preset_colors)
 # print("Optimal Pixel:", optimal_pixel)
