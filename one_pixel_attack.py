@@ -73,7 +73,7 @@ def call_model(image_array):
 
 
 
-def get_important_pixels(image, num_pixels=1):
+def get_important_pixels(image, num_pixels=10):
     """Finds the top `num_pixels` pixels that contribute the most to the model’s decision."""
     
     # Ensure input is properly formatted
@@ -102,37 +102,53 @@ def get_important_pixels(image, num_pixels=1):
 
 
 def targeted_one_pixel(image, important_pixels, max_iter=300):
-    """Performs an adversarial attack modifying only one highly important pixel from the saliency map."""
-
+    """Performs an adversarial attack by selecting the best pixel from the top `important_pixels`."""
+    
     if important_pixels is None or len(important_pixels) == 0:
         raise ValueError("You must provide at least one important pixel from a saliency map!")
 
-    x, y = important_pixels[0]  # Unpack the first (x, y) pixel
+    best_pixel = None
+    best_prob = float('-inf')  # Track the best probability change
+    best_adversarial_image = None
 
-    def perturbation(params):
-        img_copy = image.copy()
-        r = int(params[0])
-        g = int(params[1])
-        b = int(params[2])
-        img_copy[y, x] = [b, g, r]  # OpenCV uses BGR format
+    for x, y in important_pixels:  # Iterate through all top 10 important pixels
 
-        response = call_model(img_copy)  # Call the model API
-        return -response["predictions"][0]["probability"]  # Minimize original class probability
+        def perturbation(params):
+            img_copy = image.copy()
+            r = int(params[0])
+            g = int(params[1])
+            b = int(params[2])
+            img_copy[y, x] = [b, g, r]  # OpenCV uses BGR format
 
-    # Bounds for RGB values only (since x, y are preselected)
-    bounds = [(0, 255), (0, 255), (0, 255)]
+            response = call_model(img_copy)  # Call the model API
+            prob = response["predictions"][0]["probability"]
+            
+            return -prob  # Minimize the original class probability
 
-    # Run optimization
-    result = differential_evolution(perturbation, bounds, maxiter=max_iter, strategy='best1bin', popsize=20)
+        # Bounds for RGB values
+        bounds = [(0, 255), (0, 255), (0, 255)]
 
-    # Apply the optimal perturbation
-    adversarial_image = image.copy()
-    r = int(result.x[0])
-    g = int(result.x[1])
-    b = int(result.x[2])
-    adversarial_image[y, x] = [b, g, r]  # OpenCV uses BGR format
+        # Run optimization
+        result = differential_evolution(perturbation, bounds, maxiter=max_iter, strategy='best1bin', popsize=20)
 
-    return adversarial_image  # Return the modified NumPy array
+        # Apply the optimal perturbation
+        adversarial_image = image.copy()
+        r = int(result.x[0])
+        g = int(result.x[1])
+        b = int(result.x[2])
+        adversarial_image[y, x] = [b, g, r]  # OpenCV uses BGR format
+
+        # Get the new prediction
+        new_prediction = call_model(adversarial_image)["predictions"][0]["probability"]
+
+        # Keep track of the best pixel
+        if new_prediction > best_prob:
+            best_prob = new_prediction
+            best_pixel = (x, y, r, g, b)
+            best_adversarial_image = adversarial_image.copy()
+
+    print(f"Best Pixel: {best_pixel} | Best Probability: {best_prob}")
+    return best_adversarial_image  # Return the modified NumPy array
 
 
 
