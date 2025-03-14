@@ -165,7 +165,7 @@ print("Original Prediction:", original)
 preset_colors = [[0, 0, 0], [255, 255, 255], [255, 255, 0]]  # Based on research
 
 api = call_modelapi(image)
-Print("API result: ", api)
+print("API result: ", api)
 
 # optimal_pixel = one_pixel_attack(image, preset_colors)
 # print("Optimal Pixel:", optimal_pixel)
