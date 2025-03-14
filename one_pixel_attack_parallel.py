@@ -28,7 +28,7 @@ logging.basicConfig(
     ]
 )
 
-MODEL_PATH = "0.29452_f1max_0.14705_f1_0.78622_loss_0_epoch_model.hdf5"  # Default path to the H5 model file
+MODEL_PATH = "0.29452_f1max_0.14705_f1_0.78622_loss_0_epoch_model.h5"  # Default path to the H5 model file
 PRESET_COLORS = [[0, 0, 0], [255, 255, 255], [255, 255, 0]]  # based on research
 model = None  # Will be loaded globally
 

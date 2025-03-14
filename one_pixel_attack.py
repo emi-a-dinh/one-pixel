@@ -237,7 +237,7 @@ imwrite("altered_image_api.png", new_api_image)
 new_api = call_modelapi("altered_image_api.png")
 print("Pixel attack API", new_api)
 
-fggm_api = fgsm_attack_api(path)
+fggm_api = fgsm_attack_api(image)
 new_fgsm_image = produce_altered_image(fggm_api, fggm_api)
 imwrite("fgsm.png", new_fgsm_image)
 new_fgsm = call_modelapi("fgsm.png")
