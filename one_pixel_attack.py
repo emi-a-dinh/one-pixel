@@ -11,7 +11,7 @@ import sys
 import cv2
 import tempfile
 import io
-
+from vis.visualization import visualize_saliency
 
 #upgraded tensor flow from 1.15.4 to 2.07
 
@@ -70,43 +70,55 @@ def call_model(image_array):
     return {"predictions": [{"probability": float(probability)}]}
 
 
-def multi_pixel_attack(image, num_pixels=10, max_iter=100):
-    """Performs an adversarial attack by modifying up to `num_pixels` pixels using any RGB color."""
+
+def get_important_pixels(image, num_pixels=10):
+    """Finds the top `num_pixels` pixels that contribute the most to the model’s decision."""
+    img_np = np.array(image) / 255.0
+    img_np = np.expand_dims(img_np, axis=0)
+    
+    # Compute saliency map
+    grads = visualize_saliency(model, layer_idx=-1, filter_indices=0, seed_input=img_np)
+    
+    # Find the `num_pixels` highest gradient pixels
+    indices = np.dstack(np.unravel_index(np.argsort(grads.ravel())[-num_pixels:], grads.shape))
+    return indices.squeeze()
+
+
+
+def targeted_one_pixel(image, important_pixel, max_iter=300):
+    """Performs an adversarial attack modifying only one highly important pixel from the saliency map."""
+    
+    if important_pixel is None or len(important_pixel) == 0:
+        raise ValueError("You must provide an important pixel from a saliency map!")
+
+    x, y = important_pixel[0]  # Get the most important pixel
 
     def perturbation(params):
-        """Applies the pixel modifications and queries the model."""
+        """Applies the pixel modification and queries the model."""
         img_copy = image.copy()
-
-        for i in range(num_pixels):
-            x = int(params[i * 5])
-            y = int(params[i * 5 + 1])
-            r = int(params[i * 5 + 2])
-            g = int(params[i * 5 + 3])
-            b = int(params[i * 5 + 4])
-            img_copy[y, x] = [b, g, r]  # OpenCV uses BGR format
+        r = int(params[0])
+        g = int(params[1])
+        b = int(params[2])
+        img_copy[y, x] = [b, g, r]  # OpenCV uses BGR format
 
         response = call_model(img_copy)  # Call the model API
         return -response["predictions"][0]["probability"]  # Minimize original class probability
 
-    # Define search space: (x, y, r, g, b) for each pixel
-    bounds = []
-    for _ in range(num_pixels):
-        bounds.extend([(0, 64), (0, 64), (0, 255), (0, 255), (0, 255)])  # Any color in RGB space
+    # Bounds for RGB values only (since x, y are preselected)
+    bounds = [(0, 255), (0, 255), (0, 255)]
 
     # Run optimization
-    result = differential_evolution(perturbation, bounds, maxiter=max_iter)
+    result = differential_evolution(perturbation, bounds, maxiter=max_iter, strategy='best1bin', popsize=20)
 
     # Apply the optimal perturbation
     adversarial_image = image.copy()
-    for i in range(num_pixels):
-        x = int(result.x[i * 5])
-        y = int(result.x[i * 5 + 1])
-        r = int(result.x[i * 5 + 2])
-        g = int(result.x[i * 5 + 3])
-        b = int(result.x[i * 5 + 4])
-        adversarial_image[y, x] = [b, g, r]  # OpenCV uses BGR
+    r = int(result.x[0])
+    g = int(result.x[1])
+    b = int(result.x[2])
+    adversarial_image[y, x] = [b, g, r]  # OpenCV uses BGR format
 
     return adversarial_image  # Return the modified NumPy array
+
 
 
 def fgsm_attack(image, target_label=1, epsilon=0.1):
@@ -144,9 +156,10 @@ original = call_model(image)
 print("Original Prediction:", original)
 
 
+important_pixels = get_important_pixels(image, num_pixels=1)
+adversarial_image = targeted_one_pixel(image, important_pixels)
 
-multi = multi_pixel_attack(image)
-print("Multiple attack", call_model(multi))
+print("Multiple attack", call_model(adversarial_image))
 
 fgsm_image = fgsm_attack(image)
 fgsm_prediction = call_model(fgsm_image)
