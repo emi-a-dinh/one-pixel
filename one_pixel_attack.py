@@ -59,20 +59,30 @@ def call_modelapi(image_path):
     
     return response.json()  # Return the JSON response
 
+
 def one_pixel_attackapi(image_path, preset_colors, max_iter=100):
-    # Load the image
-    image = cv2.imread(image_path)  # OpenCV loads in BGR format
+    """Performs one-pixel attack to either minimize or maximize probability."""
+    image = cv2.imread(image_path)  # Load image using OpenCV (BGR format)
 
     if image is None:
         raise ValueError("Error loading image. Check the file path.")
 
     height, width, _ = image.shape  # Get image dimensions
 
+    # Step 1: Get the original probability before perturbation
+    original_response = call_modelapi(image_path)
+    original_prob = original_response["predictions"][0]["probability"]
+
+    # Decide attack direction:
+    # - If probability is near 1, we want to DECREASE it (Minimize).
+    # - If probability is near 0, we want to INCREASE it (Maximize).
+    attack_direction = -1 if original_prob > 0.5 else 1  # Flip objective
+
     def perturbation(params):
         x, y, color_idx = int(params[0]), int(params[1]), int(params[2])
         r, g, b = preset_colors[color_idx % len(preset_colors)]
-        
-        # Make a copy and apply the perturbation
+
+        # Make a copy and modify one pixel
         img_copy = image.copy()
         img_copy[y, x] = [b, g, r]  # OpenCV uses BGR format
 
@@ -81,18 +91,19 @@ def one_pixel_attackapi(image_path, preset_colors, max_iter=100):
             temp_path = temp_img.name
             cv2.imwrite(temp_path, img_copy)
 
-        # Call the model API with the new image
+        # Call the model API with the modified image
         response = call_modelapi(temp_path)
 
         # Remove the temporary image file after sending
         os.remove(temp_path)
 
-        return -response["predictions"][0]["probability"]  # Minimize probability
+        # Attack direction determines whether we minimize or maximize
+        return attack_direction * response["predictions"][0]["probability"]
 
-    # Define bounds for pixel location and color index
-    bounds = [(0, width-1), (0, height-1), (0, len(preset_colors)-1)]
+    # Define bounds for pixel position and color choice
+    bounds = [(0, width - 1), (0, height - 1), (0, len(preset_colors) - 1)]
 
-    # Run the attack optimization
+    # Run the optimization
     result = differential_evolution(perturbation, bounds, maxiter=max_iter)
 
     # Extract the best perturbation found
