@@ -8,6 +8,7 @@ from tensorflow.keras.models import model_from_json
 import os
 import requests
 import sys
+import cv2
 
 #upgraded tensor flow from 1.15.4 to 2.07
 
