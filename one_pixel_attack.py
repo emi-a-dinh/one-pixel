@@ -71,23 +71,15 @@ def one_pixel_attackapi(image_path, preset_colors, max_iter=100):
     def perturbation(params):
         x, y, color_idx = int(params[0]), int(params[1]), int(params[2])
         r, g, b = preset_colors[color_idx % len(preset_colors)]
-
+        
         # Make a copy and apply the perturbation
         img_copy = image.copy()
         img_copy[y, x] = [b, g, r]  # OpenCV uses BGR format
 
         # Save perturbed image to a temporary file
-        temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-        temp_path = temp_img.name
-        temp_img.close()  # Close so OpenCV can write to it
-        cv2.imwrite(temp_path, img_copy)
-
-        print(f"Temporary image saved at: {temp_path}")  # Debugging output
-
-        # Check if the file exists before calling API
-        if not os.path.isfile(temp_path):
-            print(f"Error: Temporary file {temp_path} does not exist!")
-            return float("inf")  # Return a high cost if image is not valid
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_img:
+            temp_path = temp_img.name
+            cv2.imwrite(temp_path, img_copy)
 
         # Call the model API with the new image
         response = call_modelapi(temp_path)
@@ -198,13 +190,16 @@ preset_colors = [[0, 0, 0], [255, 255, 255], [255, 255, 0]]  # Based on research
 api = call_modelapi(path)
 print("API result: ", api)
 
+
+optimal_api = one_pixel_attackapi(path, preset_colors)
+new_api_image = produce_altered_image(image, optimal_api)
+imwrite("altered_image_api.png", new_api_image)
+new_api = call_modelapi("altered_image_api.png")
+print("Pixel attack API", new_api)
+
 optimal_pixel = one_pixel_attack(image, preset_colors)
 # print("Optimal Pixel:", optimal_pixel)
 
-optimal_api = one_pixel_attackapi(path, preset_colors)
-new_api_image = produce_altered_image(image, optimal_pixel)
-new_api = call_modelapi(new_api_image)
-print("Pixel attack API", new_api)
 
 altered = produce_altered_image(image, optimal_pixel)
 new_prediction = call_model(altered)
