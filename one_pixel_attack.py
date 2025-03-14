@@ -10,6 +10,7 @@ import requests
 import sys
 import cv2
 import tempfile
+import io
 
 
 #upgraded tensor flow from 1.15.4 to 2.07
