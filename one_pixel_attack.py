@@ -89,24 +89,27 @@ def get_important_pixels(image, num_pixels=1):
 
     # Compute saliency map
     saliency_map = saliency(loss_function, img_np)
+    saliency_map = np.squeeze(saliency_map)  # Remove batch dimension
 
-    # Find the `num_pixels` highest gradient pixels
-    indices = np.dstack(np.unravel_index(np.argsort(saliency_map.ravel())[-num_pixels:], saliency_map.shape))
-    
-    return indices.squeeze()
+    # Find `num_pixels` highest gradient pixels
+    indices = np.unravel_index(np.argsort(saliency_map.ravel())[-num_pixels:], saliency_map.shape)
+
+    # Convert indices to (x, y) format
+    important_pixels = list(zip(indices[1], indices[0]))  # Convert to (x, y) tuples
+
+    return important_pixels 
 
 
 
-def targeted_one_pixel(image, important_pixel, max_iter=300):
+def targeted_one_pixel(image, important_pixels, max_iter=300):
     """Performs an adversarial attack modifying only one highly important pixel from the saliency map."""
-    
-    if important_pixel is None or len(important_pixel) == 0:
-        raise ValueError("You must provide an important pixel from a saliency map!")
 
-    x, y = important_pixel[0]  # Get the most important pixel
+    if important_pixels is None or len(important_pixels) == 0:
+        raise ValueError("You must provide at least one important pixel from a saliency map!")
+
+    x, y = important_pixels[0]  # Unpack the first (x, y) pixel
 
     def perturbation(params):
-        """Applies the pixel modification and queries the model."""
         img_copy = image.copy()
         r = int(params[0])
         g = int(params[1])
@@ -130,6 +133,7 @@ def targeted_one_pixel(image, important_pixel, max_iter=300):
     adversarial_image[y, x] = [b, g, r]  # OpenCV uses BGR format
 
     return adversarial_image  # Return the modified NumPy array
+
 
 
 
