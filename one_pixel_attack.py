@@ -10,33 +10,46 @@ from tensorflow.keras.models import model_from_json
 
 MODEL_PATH = "0.29452_f1max_0.14705_f1_0.78622_loss_0_epoch_model.hdf5"  # Path to your HDF5 model file
 
-# Define the model architecture manually (make sure it matches the original one)
-model = tf.keras.Sequential([
-    tf.keras.layers.Input(shape=(64, 64, 3)),
-    tf.keras.layers.Conv2D(64, (3,3), activation='relu', padding='same'),
-    tf.keras.layers.Conv2D(64, (3,3), activation='relu', padding='same'),
-    tf.keras.layers.MaxPooling2D(pool_size=(2,2)),
-    tf.keras.layers.Conv2D(128, (3,3), activation='relu', padding='same'),
-    tf.keras.layers.Conv2D(128, (3,3), activation='relu', padding='same'),
-    tf.keras.layers.MaxPooling2D(pool_size=(2,2)),
-    tf.keras.layers.Conv2D(256, (3,3), activation='relu', padding='same'),
-    tf.keras.layers.Conv2D(256, (3,3), activation='relu', padding='same'),
-    tf.keras.layers.Conv2D(256, (3,3), activation='relu', padding='same'),
-    tf.keras.layers.MaxPooling2D(pool_size=(2,2)),
-    tf.keras.layers.Conv2D(512, (3,3), activation='relu', padding='same'),
-    tf.keras.layers.Conv2D(512, (3,3), activation='relu', padding='same'),
-    tf.keras.layers.Conv2D(512, (3,3), activation='relu', padding='same'),
-    tf.keras.layers.MaxPooling2D(pool_size=(2,2)),
-    tf.keras.layers.Conv2D(512, (3,3), activation='relu', padding='same'),
-    tf.keras.layers.Conv2D(512, (3,3), activation='relu', padding='same'),
-    tf.keras.layers.Conv2D(512, (3,3), activation='relu', padding='same'),
-    tf.keras.layers.MaxPooling2D(pool_size=(2,2)),
-    tf.keras.layers.Flatten(),
-    tf.keras.layers.Dense(1, activation='sigmoid')  # Binary classification
-])
+# # Define the model architecture manually (make sure it matches the original one)
+# model = tf.keras.Sequential([
+#     tf.keras.layers.Input(shape=(64, 64, 3)),
+#     tf.keras.layers.Conv2D(64, (3,3), activation='relu', padding='same'),
+#     tf.keras.layers.Conv2D(64, (3,3), activation='relu', padding='same'),
+#     tf.keras.layers.MaxPooling2D(pool_size=(2,2)),
+#     tf.keras.layers.Conv2D(128, (3,3), activation='relu', padding='same'),
+#     tf.keras.layers.Conv2D(128, (3,3), activation='relu', padding='same'),
+#     tf.keras.layers.MaxPooling2D(pool_size=(2,2)),
+#     tf.keras.layers.Conv2D(256, (3,3), activation='relu', padding='same'),
+#     tf.keras.layers.Conv2D(256, (3,3), activation='relu', padding='same'),
+#     tf.keras.layers.Conv2D(256, (3,3), activation='relu', padding='same'),
+#     tf.keras.layers.MaxPooling2D(pool_size=(2,2)),
+#     tf.keras.layers.Conv2D(512, (3,3), activation='relu', padding='same'),
+#     tf.keras.layers.Conv2D(512, (3,3), activation='relu', padding='same'),
+#     tf.keras.layers.Conv2D(512, (3,3), activation='relu', padding='same'),
+#     tf.keras.layers.MaxPooling2D(pool_size=(2,2)),
+#     tf.keras.layers.Conv2D(512, (3,3), activation='relu', padding='same'),
+#     tf.keras.layers.Conv2D(512, (3,3), activation='relu', padding='same'),
+#     tf.keras.layers.Conv2D(512, (3,3), activation='relu', padding='same'),
+#     tf.keras.layers.MaxPooling2D(pool_size=(2,2)),
+#     tf.keras.layers.Flatten(),
+#     tf.keras.layers.Dense(1, activation='sigmoid')  # Binary classification
+# ])
 
-# Load weights from HDF5
-model.load_weights(MODEL_PATH)
+# # Load weights from HDF5
+# model.load_weights(MODEL_PATH)
+
+def load_keras_model(h5_path):
+    """Loads a Keras model safely from an HDF5 file."""
+    with h5py.File(h5_path, 'r') as f:
+        model_config = f.attrs['model_config']
+        if isinstance(model_config, bytes):  # Old TensorFlow format
+            model_config = model_config.decode('utf-8')
+        model = model_from_json(model_config)  # Load model architecture
+        model.load_weights(h5_path)  # Load weights
+    return model
+
+# Load the model
+model = load_keras_model(MODEL_PATH)
 
 
 
