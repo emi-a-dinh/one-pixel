@@ -5,7 +5,7 @@ from cv2 import imread, imwrite
 from scipy.optimize import differential_evolution
 from PIL import Image
 from tensorflow.keras.models import model_from_json
-import io
+import os
 import requests
 import sys
 
