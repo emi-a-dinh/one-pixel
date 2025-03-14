@@ -56,21 +56,46 @@ def call_modelapi(image_path):
     
     return response.json()  # Return the JSON response
 
-def one_pixel_attackapi(image, preset_colors, max_iter=100):
+def one_pixel_attackapi(image_path, preset_colors, max_iter=100):
+    # Load the image
+    image = cv2.imread(image_path)  # OpenCV loads in BGR format
+
+    if image is None:
+        raise ValueError("Error loading image. Check the file path.")
+
+    height, width, _ = image.shape  # Get image dimensions
+
     def perturbation(params):
-        img_copy = image.copy()
         x, y, color_idx = int(params[0]), int(params[1]), int(params[2])
         r, g, b = preset_colors[color_idx % len(preset_colors)]
-        img_copy[y, x] = [b, g, r]  
         
-        response = call_model(img_copy)
-        return -response["predictions"][0]["probability"]  
+        # Make a copy and apply the perturbation
+        img_copy = image.copy()
+        img_copy[y, x] = [b, g, r]  # OpenCV uses BGR format
 
-    bounds = [(0, 64), (0, 64), (0, len(preset_colors)-0.001)]
+        # Save perturbed image to a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_img:
+            temp_path = temp_img.name
+            cv2.imwrite(temp_path, img_copy)
+
+        # Call the model API with the new image
+        response = call_modelapi(temp_path)
+
+        # Remove the temporary image file after sending
+        os.remove(temp_path)
+
+        return -response["predictions"][0]["probability"]  # Minimize probability
+
+    # Define bounds for pixel location and color index
+    bounds = [(0, width-1), (0, height-1), (0, len(preset_colors)-1)]
+
+    # Run the attack optimization
     result = differential_evolution(perturbation, bounds, maxiter=max_iter)
 
+    # Extract the best perturbation found
     x, y, color_idx = int(result.x[0]), int(result.x[1]), int(result.x[2])
     r, g, b = preset_colors[color_idx % len(preset_colors)]
+
     return [x, y, r, g, b]
 
 # def load_keras_model(h5_path):
@@ -162,15 +187,20 @@ preset_colors = [[0, 0, 0], [255, 255, 255], [255, 255, 0]]  # Based on research
 api = call_modelapi(path)
 print("API result: ", api)
 
-# optimal_pixel = one_pixel_attack(image, preset_colors)
+optimal_pixel = one_pixel_attack(image, preset_colors)
 # print("Optimal Pixel:", optimal_pixel)
 
-# altered = produce_altered_image(image, optimal_pixel)
-# new_prediction = call_model(altered)
-# print("Differential Evolution Prediction:", new_prediction)
+optimal_api = one_pixel_attackapi(path, preset_colors)
+new_api_image = produce_altered_image(image, optimal_pixel)
+new_api = call_modelapi(new_api_image)
+print("Pixel attack API", new_api)
 
-# fgsm_image = fgsm_attack(image)
-# fgsm_prediction = call_model(fgsm_image)
-# print("New Prediction (after FGSM attack):", fgsm_prediction)
-# # imwrite("altered_image1.png", altered)
+altered = produce_altered_image(image, optimal_pixel)
+new_prediction = call_model(altered)
+print("Differential Evolution Prediction:", new_prediction)
+
+fgsm_image = fgsm_attack(image)
+fgsm_prediction = call_model(fgsm_image)
+print("New Prediction (after FGSM attack):", fgsm_prediction)
+# imwrite("altered_image1.png", altered)
 
