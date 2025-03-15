@@ -146,12 +146,20 @@ def differential_evolution_attack(image_path, popsize=20, generations=20, confid
     
     # Save final adversarial image
     adv_image = Image.fromarray(best_perturbed_image)
-    adv_image_path = image_path.replace(".jpg", "_adv_best.jpg").replace(".png", "_adv_best.png")
+    adv_image_path = image_path.replace(".jpg", "_adv_de.jpg").replace(".png", "_adv_de.png")
     adv_image.save(adv_image_path)
     
-    print(f"Original: {original_prob:.4f} → Adversarial: {best_adv_prob:.4f} (Pixel changed at {best_solution[0]}, {best_solution[1]})")
+    print(f"DE Attack - Original: {original_prob:.4f} → Adversarial: {best_adv_prob:.4f}")
     
-    return original_prob, best_adv_prob
+    flipped = 1 if (original_prob >= 0.5 and best_adv_prob < 0.5) or (original_prob < 0.5 and best_adv_prob >= 0.5) else 0
+    
+    return {
+        'method': 'differential_evolution',
+        'original_prob': original_prob,
+        'adversarial_prob': best_adv_prob,
+        'flipped': flipped,
+        'confidence_change': abs(best_adv_prob - original_prob)
+    }
 
 def multi_pixel_attack(image_path, num_pixels=5, max_iterations=50):
     """Applies a multi-pixel attack using greedy search."""
@@ -233,79 +241,70 @@ def multi_pixel_attack(image_path, num_pixels=5, max_iterations=50):
     adv_image_path = image_path.replace(".jpg", "_adv_multi.jpg").replace(".png", "_adv_multi.png")
     adv_image.save(adv_image_path)
     
-    print(f"Original: {original_prob:.4f} → Adversarial: {best_adv_prob:.4f} (Modified {len(modified_pixels)} pixels)")
+    print(f"Multi-pixel Attack - Original: {original_prob:.4f} → Adversarial: {best_adv_prob:.4f} (Modified {len(modified_pixels)} pixels)")
     
-    return original_prob, best_adv_prob
+    flipped = 1 if (original_prob >= 0.5 and best_adv_prob < 0.5) or (original_prob < 0.5 and best_adv_prob >= 0.5) else 0
+    
+    return {
+        'method': 'multi_pixel',
+        'original_prob': original_prob,
+        'adversarial_prob': best_adv_prob,
+        'flipped': flipped,
+        'confidence_change': abs(best_adv_prob - original_prob),
+        'pixels_modified': len(modified_pixels)
+    }
 
-def run_attack(image_path, method="best", num_pixels=5):
-    """Run a specified attack method on a single image with proper error handling."""
+def run_attack_with_comparison(image_path, methods=["de", "multi"], num_pixels=5):
+    """Run multiple attack methods on a single image and return results for comparison."""
+    results = []
+    filename = os.path.basename(image_path)
+    
     try:
-        if method == "de":
-            return differential_evolution_attack(image_path)
-        elif method == "multi":
-            return multi_pixel_attack(image_path, num_pixels=num_pixels)
-        else:  # "best"
-            # Try DE first
-            try:
-                de_result = differential_evolution_attack(image_path)
-            except Exception as e:
-                print(f"DE attack failed: {e}")
-                de_result = (None, None)
-                
-            # Try multi-pixel second
-            try:
-                mp_result = multi_pixel_attack(image_path, num_pixels=num_pixels)
-            except Exception as e:
-                print(f"Multi-pixel attack failed: {e}")
-                mp_result = (None, None)
-                
-            # If both failed, raise exception
-            if de_result[0] is None and mp_result[0] is None:
-                raise Exception("Both attack methods failed")
-                
-            # If only one succeeded, return that one
-            if de_result[0] is None:
-                return mp_result
-            if mp_result[0] is None:
-                return de_result
-                
-            # Compare which one is better (closer to target)
-            orig_prob = de_result[0]
-            de_adv_prob = de_result[1]
-            mp_adv_prob = mp_result[1]
-            
-            if abs(de_adv_prob - 0.5) < abs(mp_adv_prob - 0.5):
-                return de_result
-            else:
-                return mp_result
+        if "de" in methods:
+            print(f"\nRunning differential evolution attack on {filename}...")
+            de_result = differential_evolution_attack(image_path)
+            results.append(de_result)
     except Exception as e:
-        print(f"Attack on {image_path} failed: {e}")
-        # Return original prediction twice to indicate no change
-        try:
-            orig_prob = call_api_model(image_path)
-            return orig_prob, orig_prob
-        except:
-            return 0.5, 0.5  # Default fallback
+        print(f"DE attack failed on {filename}: {e}")
+    
+    try:
+        if "multi" in methods:
+            print(f"\nRunning multi-pixel attack on {filename}...")
+            mp_result = multi_pixel_attack(image_path, num_pixels=num_pixels)
+            results.append(mp_result)
+    except Exception as e:
+        print(f"Multi-pixel attack failed on {filename}: {e}")
+    
+    return results
 
 def main():
-    parser = argparse.ArgumentParser(description="Run improved adversarial pixel attacks via API.")
+    parser = argparse.ArgumentParser(description="Run and compare adversarial pixel attacks via API.")
     parser.add_argument("image_directory", type=str, help="Path to the directory containing images")
-    parser.add_argument("--method", type=str, default="best", choices=["de", "multi", "best"],
-                        help="Attack method: differential evolution (de), multi-pixel (multi), or best of both (best)")
-    parser.add_argument("--samples", type=int, default=20, help="Number of images to process")
+    parser.add_argument("--methods", type=str, default="both", choices=["de", "multi", "both"],
+                       help="Attack methods to compare: differential evolution (de), multi-pixel (multi), or both")
+    parser.add_argument("--samples", type=int, default=10, help="Number of images to process")
     parser.add_argument("--pixels", type=int, default=5, help="Number of pixels to modify for multi-pixel attack")
     parser.add_argument("--parallel", type=int, default=1, help="Number of parallel processes (use 1 for reliability)")
     
     args = parser.parse_args()
     image_dir = args.image_directory
     
+    # Determine which methods to run
+    methods_to_run = []
+    if args.methods == "de":
+        methods_to_run = ["de"]
+    elif args.methods == "multi":
+        methods_to_run = ["multi"]
+    else:
+        methods_to_run = ["de", "multi"]
+    
     # Create temp directory
     os.makedirs("temp_files", exist_ok=True)
     
     image_paths = load_random_images(image_dir, args.samples)
-    attack_results = []
+    all_results = []
     
-    print(f"Processing {len(image_paths)} images...")
+    print(f"Processing {len(image_paths)} images with methods: {methods_to_run}...")
     
     if args.parallel > 1:
         # More robust parallel processing
@@ -313,22 +312,22 @@ def main():
             futures = []
             for image_path in image_paths:
                 futures.append(
-                    executor.submit(run_attack, image_path, args.method, args.pixels)
+                    executor.submit(run_attack_with_comparison, image_path, methods_to_run, args.pixels)
                 )
             
             for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures)):
                 try:
-                    result = future.result()
-                    if result is not None:
-                        attack_results.append(result)
+                    results = future.result()
+                    if results:
+                        all_results.extend(results)
                 except Exception as e:
                     print(f"Error in worker process: {e}")
     else:
         # Sequential processing
         for image_path in tqdm(image_paths):
-            result = run_attack(image_path, args.method, args.pixels)
-            if result is not None:
-                attack_results.append(result)
+            results = run_attack_with_comparison(image_path, methods_to_run, args.pixels)
+            if results:
+                all_results.extend(results)
     
     # Clean up temp directory
     for filename in os.listdir("temp_files"):
@@ -337,27 +336,91 @@ def main():
         except:
             pass
     
-    # Filter out None results
-    attack_results = [r for r in attack_results if r[0] is not None and r[1] is not None]
+    # Group results by method
+    de_results = [r for r in all_results if r['method'] == 'differential_evolution']
+    mp_results = [r for r in all_results if r['method'] == 'multi_pixel']
     
-    if not attack_results:
-        print("No successful attacks were completed.")
-        return
+    # Statistics for comparison
+    print("\n===== ATTACK METHODS COMPARISON =====")
     
-    attack_results = np.array(attack_results)
+    print("\nDifferential Evolution Attack:")
+    print(f"Images tested: {len(de_results)}")
+    print(f"Average original confidence: {np.mean([r['original_prob'] for r in de_results]):.4f}")
+    print(f"Average adversarial confidence: {np.mean([r['adversarial_prob'] for r in de_results]):.4f}")
+    print(f"Average confidence change: {np.mean([r['confidence_change'] for r in de_results]):.4f}")
     
-    print("\nFinal Summary")
-    print(f"Mean of original model outputs: {np.mean(attack_results[:, 0]):.4f}")
-    print(f"Mean of adversarial model outputs: {np.mean(attack_results[:, 1]):.4f}")
-    print(f"Standard deviation of model outputs: {np.std(attack_results, axis=0)}")
+    flipped = sum(r['flipped'] for r in de_results)
+    print(f"Successfully flipped predictions: {flipped}/{len(de_results)} ({flipped/len(de_results)*100:.1f}%)")
     
-    # Count how many predictions were flipped
-    flipped = sum(1 for orig, adv in attack_results if (orig >= 0.5 and adv < 0.5) or (orig < 0.5 and adv >= 0.5))
-    print(f"Successfully flipped {flipped}/{len(attack_results)} predictions ({flipped/len(attack_results)*100:.1f}%)")
+    if mp_results:
+        print("\nMulti-Pixel Attack:")
+        print(f"Images tested: {len(mp_results)}")
+        print(f"Average original confidence: {np.mean([r['original_prob'] for r in mp_results]):.4f}")
+        print(f"Average adversarial confidence: {np.mean([r['adversarial_prob'] for r in mp_results]):.4f}")
+        print(f"Average confidence change: {np.mean([r['confidence_change'] for r in mp_results]):.4f}")
+        
+        flipped = sum(r['flipped'] for r in mp_results)
+        print(f"Successfully flipped predictions: {flipped}/{len(mp_results)} ({flipped/len(mp_results)*100:.1f}%)")
+        
+        if 'pixels_modified' in mp_results[0]:
+            print(f"Average pixels modified: {np.mean([r.get('pixels_modified', 0) for r in mp_results]):.1f}")
     
-    # Calculate average confidence change
-    avg_change = np.mean(np.abs(attack_results[:, 1] - attack_results[:, 0]))
-    print(f"Average confidence change: {avg_change:.4f}")
+    # Direct comparison for images that had both attacks
+    if de_results and mp_results:
+        # Find images that were tested with both methods
+        de_images = {r['original_prob'] for r in de_results}  # Using original prob as a proxy for image ID
+        mp_images = {r['original_prob'] for r in mp_results}
+        common_images = de_images.intersection(mp_images)
+        
+        if common_images:
+            print("\nDirect Method Comparison (same images):")
+            print(f"Number of images with both attacks: {len(common_images)}")
+            
+            # Filter results for common images
+            common_de = [r for r in de_results if r['original_prob'] in common_images]
+            common_mp = [r for r in mp_results if r['original_prob'] in common_images]
+            
+            # Compare effectiveness
+            de_changes = [r['confidence_change'] for r in common_de]
+            mp_changes = [r['confidence_change'] for r in common_mp]
+            
+            print(f"DE average confidence change: {np.mean(de_changes):.4f}")
+            print(f"Multi-pixel average confidence change: {np.mean(mp_changes):.4f}")
+            
+            de_flips = sum(r['flipped'] for r in common_de)
+            mp_flips = sum(r['flipped'] for r in common_mp)
+            
+            print(f"DE flipped predictions: {de_flips}/{len(common_de)} ({de_flips/len(common_de)*100:.1f}%)")
+            print(f"Multi-pixel flipped predictions: {mp_flips}/{len(common_mp)} ({mp_flips/len(common_mp)*100:.1f}%)")
+            
+            # Count cases where one method outperformed the other
+            de_wins = 0
+            mp_wins = 0
+            ties = 0
+            
+            for de_r in common_de:
+                # Find matching multi-pixel result
+                mp_r = next((r for r in common_mp if r['original_prob'] == de_r['original_prob']), None)
+                if mp_r:
+                    if de_r['confidence_change'] > mp_r['confidence_change']:
+                        de_wins += 1
+                    elif mp_r['confidence_change'] > de_r['confidence_change']:
+                        mp_wins += 1
+                    else:
+                        ties += 1
+            
+            print(f"DE performed better: {de_wins} images ({de_wins/len(common_images)*100:.1f}%)")
+            print(f"Multi-pixel performed better: {mp_wins} images ({mp_wins/len(common_images)*100:.1f}%)")
+            print(f"Both methods equally effective: {ties} images ({ties/len(common_images)*100:.1f}%)")
+    
+    # Save results to CSV for further analysis
+    try:
+        import pandas as pd
+        df = pd.DataFrame(all_results)
+        df.to_csv("attack_comparison_results.csv", index=False)
+        print("\nDetailed results saved to attack_comparison_results.csv")
+    except ImportError:
+        print("\nPandas not available, skipping CSV export")
 
 if __name__ == "__main__":
     main()
