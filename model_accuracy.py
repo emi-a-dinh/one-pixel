@@ -10,10 +10,10 @@ import cv2
 import sys
 
 # Path to your .h5 model
-MODEL_PATH = "path/to/your/model.h5"
+MODEL_PATH = "0.29452_f1max_0.14705_f1_0.78622_loss_0_epoch_model.h5"
 
 # Directory containing images (JPG, PNG, or other formats)
-IMAGE_DIR = "path/to/your/images"
+IMAGE_DIR = "../deep-histopath/data/mitoses/patches/val/normal"
 
 # Load the Keras model from .h5
 model = load_model(MODEL_PATH)
@@ -39,8 +39,8 @@ def run_model_on_image(image_path):
     return prediction.flatten()  # Convert output to 1D NumPy array
 
 def main():
-    MODEL_PATH = sys.argv[2]
-    image_paths = load_random_images(sys.argv[1])
+
+    image_paths = load_random_images(IMAGE_DIR)
     results = []
 
     for image_path in image_paths:
