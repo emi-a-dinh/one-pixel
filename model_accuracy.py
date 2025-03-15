@@ -11,7 +11,7 @@ import sys
 from PIL import Image
 
 # Path to your .h5 model
-MODEL_PATH = "0.29452_f1max_0.14705_f1_0.78622_loss_0_epoch_model.h5"
+MODEL_PATH = "0.58158_f1max_0.57687_f1_0.979_loss_0_epoch_model.hdf5"
 
 # Directory containing images (JPG, PNG, or other formats)
 IMAGE_DIR = "../deep-histopath/data/mitoses/patches/val/mitosis"
