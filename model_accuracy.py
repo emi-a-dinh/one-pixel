@@ -15,7 +15,7 @@ def call_api_model(image_path):
         result = response.json()
         return result["predictions"][0]["probability"]
 
-def load_random_images(directory, num_samples=100):
+def load_random_images(directory, num_samples=1000):
     """Selects 100 random images from the directory."""
     all_images = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith(('jpg', 'png', 'jpeg'))]
     return random.sample(all_images, min(num_samples, len(all_images)))
@@ -23,7 +23,7 @@ def load_random_images(directory, num_samples=100):
 def run_model_on_image(image_path):
     """Sends the image path to the API and gets the result."""
     prediction = call_api_model(image_path)
-    print(f"✅ Prediction for {image_path}: {prediction}")
+    # print(f"Prediction for {image_path}: {prediction}")
     return prediction
 
 def main():
@@ -38,9 +38,9 @@ def main():
     results = [run_model_on_image(image_path) for image_path in image_paths]
 
     results = np.array(results)
-    print("\n📊 **Final Summary**")
-    print(f"📌 Mean of model outputs:\n {np.mean(results)}")
-    print(f"📌 Standard deviation of model outputs:\n {np.std(results)}")
+    print("\n **Final Summary**")
+    print(f"Mean of model outputs:\n {np.mean(results)}")
+    print(f"Standard deviation of model outputs:\n {np.std(results)}")
 
 if __name__ == "__main__":
     main()
