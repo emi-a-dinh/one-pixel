@@ -3,7 +3,6 @@ import random
 import numpy as np
 import requests
 import argparse
-import cv2
 from PIL import Image
 
 # API endpoint
@@ -22,23 +21,30 @@ def load_random_images(directory, num_samples=1000):
     all_images = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith(('jpg', 'png', 'jpeg'))]
     return random.sample(all_images, min(num_samples, len(all_images)))
 
-def get_salient_pixels(image_array, top_k=5):
-    """Finds the most salient (important) pixels using edge detection."""
-    gray = cv2.cvtColor(image_array, cv2.COLOR_RGB2GRAY)
-    edges = cv2.Canny(gray, threshold1=30, threshold2=100)  # Edge detection
+def estimate_gradient(image_array, pixel, step=10):
+    """Approximates the gradient by checking sensitivity to pixel changes."""
+    x, y = pixel
+    perturbed_image = image_array.copy()
 
-    # Find non-zero edge pixels
-    edge_pixels = np.argwhere(edges > 0)
+    # Try increasing pixel intensity
+    perturbed_image[y, x] = np.clip(perturbed_image[y, x] + step, 0, 255)
+    Image.fromarray(perturbed_image).save("temp_plus.png")
+    plus_prob = call_api_model("temp_plus.png")
 
-    if len(edge_pixels) == 0:
-        return [tuple(random.randint(0, i - 1) for i in image_array.shape[:2])]  # Fallback: random pixel
+    # Try decreasing pixel intensity
+    perturbed_image[y, x] = np.clip(perturbed_image[y, x] - 2 * step, 0, 255)
+    Image.fromarray(perturbed_image).save("temp_minus.png")
+    minus_prob = call_api_model("temp_minus.png")
 
-    # Randomly select top-k most salient pixels
-    selected_pixels = random.sample(list(edge_pixels), min(top_k, len(edge_pixels)))
-    return selected_pixels
+    # Restore original pixel
+    perturbed_image[y, x] = image_array[y, x]
 
-def adaptive_pixel_attack(image_path, max_attempts=10, perturbation_magnitude=100):
-    """Performs an adaptive attack by targeting the most salient pixels."""
+    # Compute numerical gradient (central difference approximation)
+    gradient = (plus_prob - minus_prob) / (2 * step)
+    return abs(gradient)
+
+def fgsm_one_pixel_attack(image_path, max_attempts=20, perturbation_magnitude=255):
+    """Applies FGSM-inspired one-pixel attack by estimating gradient information."""
     
     # Load image
     image = Image.open(image_path).convert("RGB")
@@ -47,54 +53,52 @@ def adaptive_pixel_attack(image_path, max_attempts=10, perturbation_magnitude=10
     # Get original prediction
     original_prob = call_api_model(image_path)
 
-    # Find important pixels (high-contrast edges)
-    salient_pixels = get_salient_pixels(img_array, top_k=5)
-
+    h, w, _ = img_array.shape
+    candidate_pixels = [(random.randint(0, w - 1), random.randint(0, h - 1)) for _ in range(50)]
+    
+    # Find the most sensitive pixel
+    best_pixel = max(candidate_pixels, key=lambda p: estimate_gradient(img_array, p))
+    
     best_adv_prob = original_prob
-    best_pixel = None
     best_adv_image = img_array.copy()
 
     for _ in range(max_attempts):
-        perturbed_image = img_array.copy()
+        perturbed_image = best_adv_image.copy()
+        x, y = best_pixel
 
-        # Pick a high-impact pixel
-        x, y = random.choice(salient_pixels)
-
-        # Modify all RGB channels for maximum impact
+        # Modify pixel based on initial probability
         if original_prob < 0.5:
             perturbed_image[y, x] = np.clip(perturbed_image[y, x] + perturbation_magnitude, 0, 255)
         else:
             perturbed_image[y, x] = np.clip(perturbed_image[y, x] - perturbation_magnitude, 0, 255)
 
-        # Save temporary adversarial image
+        # Save and test adversarial image
         adv_image_path = image_path.replace(".jpg", "_adv.jpg").replace(".png", "_adv.png")
         adv_image = Image.fromarray(perturbed_image)
         adv_image.save(adv_image_path)
 
-        # Get adversarial prediction
         adversarial_prob = call_api_model(adv_image_path)
 
         # Keep the best attack so far
         if abs(adversarial_prob - 0.5) > abs(best_adv_prob - 0.5):
             best_adv_prob = adversarial_prob
-            best_pixel = (x, y)
             best_adv_image = perturbed_image.copy()
 
         # Stop early if the attack is successful
         if (original_prob >= 0.5 and best_adv_prob <= 0.5) or (original_prob < 0.5 and best_adv_prob > 0.5):
             break
 
-    # Save the best adversarial image
+    # Save final adversarial image
     adv_image = Image.fromarray(best_adv_image)
     adv_image_path = image_path.replace(".jpg", "_adv_best.jpg").replace(".png", "_adv_best.png")
     adv_image.save(adv_image_path)
 
-    print(f"Original: {original_prob:.4f} → Adversarial: {best_adv_prob:.4f} (Salient Pixel changed at {best_pixel})")
+    print(f"Original: {original_prob:.4f} → Adversarial: {best_adv_prob:.4f} (Pixel changed at {best_pixel})")
 
     return original_prob, best_adv_prob
 
 def main():
-    parser = argparse.ArgumentParser(description="Run an image classification model via API with adaptive pixel attack.")
+    parser = argparse.ArgumentParser(description="Run an FGSM-inspired one-pixel attack via API.")
     parser.add_argument("image_directory", type=str, help="Path to the directory containing images")
 
     args = parser.parse_args()
@@ -102,7 +106,7 @@ def main():
 
     image_paths = load_random_images(image_dir)
 
-    attack_results = [adaptive_pixel_attack(image_path) for image_path in image_paths]
+    attack_results = [fgsm_one_pixel_attack(image_path) for image_path in image_paths]
 
     attack_results = np.array(attack_results)
     print("\nFinal Summary")
