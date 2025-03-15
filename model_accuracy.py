@@ -18,28 +18,39 @@ IMAGE_DIR = "../deep-histopath/data/mitoses/patches/val/normal"
 # Load the Keras model from .h5
 model = load_model(MODEL_PATH)
 
-# Define image preprocessing function
-def preprocess_image(image_path, target_size=(224, 224)):
-    """Loads an image, resizes it, and preprocesses it for the model."""
-    image = cv2.imread(image_path)  # Load the image using OpenCV
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert to RGB
-    image = resize(image, target_size)  # Resize to match model input
-    image = img_to_array(image) / 255.0  # Normalize pixel values
-    return np.expand_dims(image, axis=0)  # Add batch dimension
 
-def load_random_images(directory, num_samples=1000):
-    """Select 100 random image file paths from the directory."""
+def call_model(image_array):
+    """Runs the local HDF5 model on the input image."""
+    img_pil = Image.fromarray(np.uint8(image_array))
+
+    if img_pil.size != (64, 64):
+        img_pil = img_pil.resize((64, 64))
+
+    img_np = np.array(img_pil) / 255.0  # Normalize pixel values
+    img_np = np.expand_dims(img_np, axis=0)  # Add batch dimension
+
+    predictions = model.predict(img_np)
+
+    # Apply correct activation function based on model type
+    if predictions.shape[-1] == 1:  # Binary classification (single output neuron)
+        probability = tf.nn.sigmoid(predictions).numpy()[0][0]
+    else:  # Multi-class classification (more than 1 output neuron)
+        probability = tf.nn.softmax(predictions).numpy()[0].tolist()
+
+    return probability
+
+def load_random_images(directory, num_samples=100):
+    """Selects 100 random images from the directory."""
     all_images = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith(('jpg', 'png', 'jpeg'))]
     return random.sample(all_images, min(num_samples, len(all_images)))
 
 def run_model_on_image(image_path):
-    """Runs an image through the model and returns predictions."""
-    image = preprocess_image(image_path)
-    prediction = model.predict(image)
-    return prediction.flatten()  # Convert output to 1D NumPy array
+    """Loads an image and runs it through the model."""
+    image = Image.open(image_path).convert("RGB")  # Open as RGB
+    image = np.array(image)  # Convert to NumPy array
+    return call_model(image)  # Get predictions
 
 def main():
-
     image_paths = load_random_images(IMAGE_DIR)
     results = []
 
@@ -47,7 +58,7 @@ def main():
         output = run_model_on_image(image_path)
         results.append(output)
 
-    results = np.array(results)  # Convert list to NumPy array for statistics
+    results = np.array(results)  # Convert list to NumPy array
     mean_values = np.mean(results, axis=0)
     std_values = np.std(results, axis=0)
 
