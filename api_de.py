@@ -3,9 +3,11 @@ import random
 import numpy as np
 import requests
 import argparse
+import uuid
 from PIL import Image
 from tqdm import tqdm
 import concurrent.futures
+import time
 
 # API endpoint
 API_URL = "http://localhost:5000/model/predict"
@@ -22,6 +24,12 @@ def load_random_images(directory, num_samples=1000):
     """Selects a specified number of random images from the directory."""
     all_images = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith(('jpg', 'png', 'jpeg'))]
     return random.sample(all_images, min(num_samples, len(all_images)))
+
+def get_temp_path(prefix="temp"):
+    """Generate a unique temporary file path to avoid collisions between processes."""
+    # Create a temp directory if it doesn't exist
+    os.makedirs("temp_files", exist_ok=True)
+    return f"temp_files/{prefix}_{uuid.uuid4().hex}.png"
 
 def differential_evolution_attack(image_path, popsize=20, generations=20, confidence_threshold=0.1):
     """Uses differential evolution to find optimal pixel modifications."""
@@ -47,6 +55,8 @@ def differential_evolution_attack(image_path, popsize=20, generations=20, confid
     
     best_solution = None
     best_fitness = float('inf')
+    best_adv_prob = original_prob
+    best_perturbed_image = img_array.copy()
     
     for generation in range(generations):
         # Evaluate fitness of each candidate
@@ -57,16 +67,27 @@ def differential_evolution_attack(image_path, popsize=20, generations=20, confid
             perturbed_image[y, x] = [r, g, b]
             
             # Save and test adversarial image
-            temp_path = f"temp_{generation}_{x}_{y}.png"
-            Image.fromarray(perturbed_image).save(temp_path)
-            adv_prob = call_api_model(temp_path)
+            temp_path = get_temp_path(f"de_{generation}")
+            try:
+                Image.fromarray(perturbed_image).save(temp_path)
+                adv_prob = call_api_model(temp_path)
+                
+                # Fitness is distance from target probability
+                fitness = abs(adv_prob - target)
+                fitness_scores.append((fitness, candidate, adv_prob, perturbed_image))
+                
+            except Exception as e:
+                print(f"Error evaluating candidate: {e}")
+                # Use a high fitness value for failed evaluations
+                fitness_scores.append((1.0, candidate, original_prob, img_array.copy()))
             
-            # Fitness is distance from target probability
-            fitness = abs(adv_prob - target)
-            fitness_scores.append((fitness, candidate, adv_prob, perturbed_image))
-            
-            # Clean up temporary file
-            os.remove(temp_path)
+            finally:
+                # Clean up temporary file
+                try:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                except:
+                    pass
             
             # Stop early if we've found a good solution
             if fitness < confidence_threshold:
@@ -173,19 +194,28 @@ def multi_pixel_attack(image_path, num_pixels=5, max_iterations=50):
                 temp_image[y, x] = [r, g, b]
                 
                 # Save and test
-                temp_path = f"temp_multi_{pixel_idx}_{x}_{y}.png"
-                Image.fromarray(temp_image).save(temp_path)
-                adv_prob = call_api_model(temp_path)
-                os.remove(temp_path)
-                
-                # Update best if this is better
-                if abs(adv_prob - target) < abs(best_prob - target):
-                    best_prob = adv_prob
-                    best_pixel = (x, y)
-                    best_color = [r, g, b]
+                temp_path = get_temp_path(f"multi_{pixel_idx}")
+                try:
+                    Image.fromarray(temp_image).save(temp_path)
+                    adv_prob = call_api_model(temp_path)
                     
+                    # Update best if this is better
+                    if abs(adv_prob - target) < abs(best_prob - target):
+                        best_prob = adv_prob
+                        best_pixel = (x, y)
+                        best_color = [r, g, b]
+                except Exception as e:
+                    print(f"Error testing pixel: {e}")
+                finally:
+                    # Clean up
+                    try:
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
+                    except:
+                        pass
+                
                 # Stop early if we've flipped the prediction
-                if (original_prob >= 0.5 and adv_prob < 0.5) or (original_prob < 0.5 and adv_prob >= 0.5):
+                if (original_prob >= 0.5 and best_prob < 0.5) or (original_prob < 0.5 and best_prob >= 0.5):
                     break
         
         # If we found a better pixel, update our image
@@ -207,20 +237,55 @@ def multi_pixel_attack(image_path, num_pixels=5, max_iterations=50):
     
     return original_prob, best_adv_prob
 
-def parallel_attack(image_path):
-    """Try both attack methods and return the best result."""
-    de_result = differential_evolution_attack(image_path)
-    mp_result = multi_pixel_attack(image_path)
-    
-    # Return the result that changed the probability the most
-    orig_prob = de_result[0]  # Both should have the same original probability
-    de_adv_prob = de_result[1]
-    mp_adv_prob = mp_result[1]
-    
-    if abs(de_adv_prob - 0.5) < abs(mp_adv_prob - 0.5):
-        return orig_prob, de_adv_prob
-    else:
-        return orig_prob, mp_adv_prob
+def run_attack(image_path, method="best", num_pixels=5):
+    """Run a specified attack method on a single image with proper error handling."""
+    try:
+        if method == "de":
+            return differential_evolution_attack(image_path)
+        elif method == "multi":
+            return multi_pixel_attack(image_path, num_pixels=num_pixels)
+        else:  # "best"
+            # Try DE first
+            try:
+                de_result = differential_evolution_attack(image_path)
+            except Exception as e:
+                print(f"DE attack failed: {e}")
+                de_result = (None, None)
+                
+            # Try multi-pixel second
+            try:
+                mp_result = multi_pixel_attack(image_path, num_pixels=num_pixels)
+            except Exception as e:
+                print(f"Multi-pixel attack failed: {e}")
+                mp_result = (None, None)
+                
+            # If both failed, raise exception
+            if de_result[0] is None and mp_result[0] is None:
+                raise Exception("Both attack methods failed")
+                
+            # If only one succeeded, return that one
+            if de_result[0] is None:
+                return mp_result
+            if mp_result[0] is None:
+                return de_result
+                
+            # Compare which one is better (closer to target)
+            orig_prob = de_result[0]
+            de_adv_prob = de_result[1]
+            mp_adv_prob = mp_result[1]
+            
+            if abs(de_adv_prob - 0.5) < abs(mp_adv_prob - 0.5):
+                return de_result
+            else:
+                return mp_result
+    except Exception as e:
+        print(f"Attack on {image_path} failed: {e}")
+        # Return original prediction twice to indicate no change
+        try:
+            orig_prob = call_api_model(image_path)
+            return orig_prob, orig_prob
+        except:
+            return 0.5, 0.5  # Default fallback
 
 def main():
     parser = argparse.ArgumentParser(description="Run improved adversarial pixel attacks via API.")
@@ -229,10 +294,13 @@ def main():
                         help="Attack method: differential evolution (de), multi-pixel (multi), or best of both (best)")
     parser.add_argument("--samples", type=int, default=20, help="Number of images to process")
     parser.add_argument("--pixels", type=int, default=5, help="Number of pixels to modify for multi-pixel attack")
-    parser.add_argument("--parallel", type=int, default=4, help="Number of parallel processes")
+    parser.add_argument("--parallel", type=int, default=1, help="Number of parallel processes (use 1 for reliability)")
     
     args = parser.parse_args()
     image_dir = args.image_directory
+    
+    # Create temp directory
+    os.makedirs("temp_files", exist_ok=True)
     
     image_paths = load_random_images(image_dir, args.samples)
     attack_results = []
@@ -240,23 +308,41 @@ def main():
     print(f"Processing {len(image_paths)} images...")
     
     if args.parallel > 1:
+        # More robust parallel processing
         with concurrent.futures.ProcessPoolExecutor(max_workers=args.parallel) as executor:
-            attack_func = {
-                "de": differential_evolution_attack,
-                "multi": lambda path: multi_pixel_attack(path, num_pixels=args.pixels),
-                "best": parallel_attack
-            }[args.method]
+            futures = []
+            for image_path in image_paths:
+                futures.append(
+                    executor.submit(run_attack, image_path, args.method, args.pixels)
+                )
             
-            attack_results = list(tqdm(executor.map(attack_func, image_paths), total=len(image_paths)))
+            for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures)):
+                try:
+                    result = future.result()
+                    if result is not None:
+                        attack_results.append(result)
+                except Exception as e:
+                    print(f"Error in worker process: {e}")
     else:
+        # Sequential processing
         for image_path in tqdm(image_paths):
-            if args.method == "de":
-                result = differential_evolution_attack(image_path)
-            elif args.method == "multi":
-                result = multi_pixel_attack(image_path, num_pixels=args.pixels)
-            else:  # best
-                result = parallel_attack(image_path)
-            attack_results.append(result)
+            result = run_attack(image_path, args.method, args.pixels)
+            if result is not None:
+                attack_results.append(result)
+    
+    # Clean up temp directory
+    for filename in os.listdir("temp_files"):
+        try:
+            os.remove(os.path.join("temp_files", filename))
+        except:
+            pass
+    
+    # Filter out None results
+    attack_results = [r for r in attack_results if r[0] is not None and r[1] is not None]
+    
+    if not attack_results:
+        print("No successful attacks were completed.")
+        return
     
     attack_results = np.array(attack_results)
     
@@ -268,6 +354,10 @@ def main():
     # Count how many predictions were flipped
     flipped = sum(1 for orig, adv in attack_results if (orig >= 0.5 and adv < 0.5) or (orig < 0.5 and adv >= 0.5))
     print(f"Successfully flipped {flipped}/{len(attack_results)} predictions ({flipped/len(attack_results)*100:.1f}%)")
+    
+    # Calculate average confidence change
+    avg_change = np.mean(np.abs(attack_results[:, 1] - attack_results[:, 0]))
+    print(f"Average confidence change: {avg_change:.4f}")
 
 if __name__ == "__main__":
     main()
