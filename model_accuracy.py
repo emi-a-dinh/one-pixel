@@ -25,32 +25,33 @@ def run_model_on_image(image_path):
     """Sends the image path to the API and gets the result."""
     return call_api_model(image_path)
 
-def fgsm_one_pixel_attack(image_path, max_attempts=10, perturbation_magnitude=50):
-    """Attempts to flip the classification by modifying one pixel with the most effective perturbation."""
+def iterative_pixel_attack(image_path, max_pixels=5, perturbation_magnitude=100, iterations=5):
+    """Modifies multiple pixels iteratively to increase attack effectiveness."""
     
-    # Load image
+    # Load original image
     image = Image.open(image_path).convert("RGB")
     img_array = np.array(image, dtype=np.uint8)
 
     # Get original prediction
     original_prob = run_model_on_image(image_path)
 
-    # Try modifying multiple pixels and pick the most effective one
-    best_adv_prob = original_prob
-    best_pixel = None
-    best_adv_image = img_array.copy()
-
     h, w, _ = img_array.shape
 
-    for _ in range(max_attempts):
-        x, y = random.randint(0, w - 1), random.randint(0, h - 1)
-        perturbed_image = img_array.copy()
+    # Select multiple random pixels
+    pixels = [(random.randint(0, w - 1), random.randint(0, h - 1)) for _ in range(max_pixels)]
 
-        # Modify all RGB channels for a stronger effect
-        if original_prob < 0.5:
-            perturbed_image[y, x] = np.clip(perturbed_image[y, x] + perturbation_magnitude, 0, 255)
-        else:
-            perturbed_image[y, x] = np.clip(perturbed_image[y, x] - perturbation_magnitude, 0, 255)
+    best_adv_prob = original_prob
+    best_adv_image = img_array.copy()
+
+    for _ in range(iterations):
+        perturbed_image = best_adv_image.copy()
+
+        for x, y in pixels:
+            # Modify all RGB channels for a stronger effect
+            if original_prob < 0.5:
+                perturbed_image[y, x] = np.clip(perturbed_image[y, x] + perturbation_magnitude, 0, 255)
+            else:
+                perturbed_image[y, x] = np.clip(perturbed_image[y, x] - perturbation_magnitude, 0, 255)
 
         # Save temporary adversarial image
         adv_image_path = image_path.replace(".jpg", "_adv.jpg").replace(".png", "_adv.png")
@@ -60,10 +61,9 @@ def fgsm_one_pixel_attack(image_path, max_attempts=10, perturbation_magnitude=50
         # Get adversarial prediction
         adversarial_prob = run_model_on_image(adv_image_path)
 
-        # Check if this perturbation is the most effective
+        # Keep the best attack so far
         if abs(adversarial_prob - 0.5) > abs(best_adv_prob - 0.5):
             best_adv_prob = adversarial_prob
-            best_pixel = (x, y)
             best_adv_image = perturbed_image.copy()
 
         # Stop early if the attack is successful
@@ -75,12 +75,12 @@ def fgsm_one_pixel_attack(image_path, max_attempts=10, perturbation_magnitude=50
     adv_image_path = image_path.replace(".jpg", "_adv_best.jpg").replace(".png", "_adv_best.png")
     adv_image.save(adv_image_path)
 
-    print(f"Original: {original_prob:.4f} → Adversarial: {best_adv_prob:.4f} (Pixel changed at {best_pixel})")
+    print(f"Original: {original_prob:.4f} → Adversarial: {best_adv_prob:.4f} (Pixels changed: {pixels})")
 
     return original_prob, best_adv_prob
 
 def main():
-    parser = argparse.ArgumentParser(description="Run an image classification model via API with FGSM attack.")
+    parser = argparse.ArgumentParser(description="Run an image classification model via API with iterative FGSM attack.")
     parser.add_argument("image_directory", type=str, help="Path to the directory containing images")
 
     args = parser.parse_args()
@@ -88,7 +88,7 @@ def main():
 
     image_paths = load_random_images(image_dir)
 
-    attack_results = [fgsm_one_pixel_attack(image_path) for image_path in image_paths]
+    attack_results = [iterative_pixel_attack(image_path) for image_path in image_paths]
 
     attack_results = np.array(attack_results)
     print("\nFinal Summary")
