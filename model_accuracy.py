@@ -5,7 +5,7 @@ import requests
 import argparse
 from PIL import Image
 
-# API endpoint (replace with actual endpoint)
+# API endpoint
 API_URL = "http://localhost:5000/model/predict"
 
 def call_api_model(image_path):
@@ -25,38 +25,62 @@ def run_model_on_image(image_path):
     """Sends the image path to the API and gets the result."""
     return call_api_model(image_path)
 
-def fgsm_pixel_attack(image_path):
-    """Performs a one-pixel FGSM attack to flip classification confidence above or below 0.5."""
+def fgsm_one_pixel_attack(image_path, max_attempts=10, perturbation_magnitude=50):
+    """Attempts to flip the classification by modifying one pixel with the most effective perturbation."""
     
-    # Load original image
+    # Load image
     image = Image.open(image_path).convert("RGB")
     img_array = np.array(image, dtype=np.uint8)
 
     # Get original prediction
     original_prob = run_model_on_image(image_path)
 
-    # Choose a random pixel
+    # Try modifying multiple pixels and pick the most effective one
+    best_adv_prob = original_prob
+    best_pixel = None
+    best_adv_image = img_array.copy()
+
     h, w, _ = img_array.shape
-    x, y = random.randint(0, w - 1), random.randint(0, h - 1)
 
-    # Determine attack direction
-    perturbation = 10 if original_prob < 0.5 else -10  # Small pixel change
-    img_array[y, x] = np.clip(img_array[y, x] + perturbation, 0, 255)  # Modify the pixel
+    for _ in range(max_attempts):
+        x, y = random.randint(0, w - 1), random.randint(0, h - 1)
+        perturbed_image = img_array.copy()
 
-    # Save adversarial image
-    adv_image_path = image_path.replace(".jpg", "_adv.jpg").replace(".png", "_adv.png")
-    adv_image = Image.fromarray(img_array)
+        # Modify all RGB channels for a stronger effect
+        if original_prob < 0.5:
+            perturbed_image[y, x] = np.clip(perturbed_image[y, x] + perturbation_magnitude, 0, 255)
+        else:
+            perturbed_image[y, x] = np.clip(perturbed_image[y, x] - perturbation_magnitude, 0, 255)
+
+        # Save temporary adversarial image
+        adv_image_path = image_path.replace(".jpg", "_adv.jpg").replace(".png", "_adv.png")
+        adv_image = Image.fromarray(perturbed_image)
+        adv_image.save(adv_image_path)
+
+        # Get adversarial prediction
+        adversarial_prob = run_model_on_image(adv_image_path)
+
+        # Check if this perturbation is the most effective
+        if abs(adversarial_prob - 0.5) > abs(best_adv_prob - 0.5):
+            best_adv_prob = adversarial_prob
+            best_pixel = (x, y)
+            best_adv_image = perturbed_image.copy()
+
+        # Stop early if the attack is successful
+        if (original_prob >= 0.5 and best_adv_prob <= 0.5) or (original_prob < 0.5 and best_adv_prob > 0.5):
+            break
+
+    # Save the best adversarial image
+    adv_image = Image.fromarray(best_adv_image)
+    adv_image_path = image_path.replace(".jpg", "_adv_best.jpg").replace(".png", "_adv_best.png")
     adv_image.save(adv_image_path)
 
-    # Get new prediction
-    adversarial_prob = run_model_on_image(adv_image_path)
+    print(f"Original: {original_prob:.4f} → Adversarial: {best_adv_prob:.4f} (Pixel changed at {best_pixel})")
 
-    print(f"\nOriginal: {original_prob:.4f} → Adversarial: {adversarial_prob:.4f} (Pixel changed at ({x}, {y}))")
-
-    return original_prob, adversarial_prob
+    return original_prob, best_adv_prob
 
 def main():
-    parser = argparse.ArgumentParser(description="Run an image classification model via API.")
+    parser = argparse.ArgumentParser(description="Run an image classification model via API with FGSM attack.")
     parser.add_argument("image_directory", type=str, help="Path to the directory containing images")
 
     args = parser.parse_args()
@@ -64,7 +88,7 @@ def main():
 
     image_paths = load_random_images(image_dir)
 
-    attack_results = [fgsm_pixel_attack(image_path) for image_path in image_paths]
+    attack_results = [fgsm_one_pixel_attack(image_path) for image_path in image_paths]
 
     attack_results = np.array(attack_results)
     print("\nFinal Summary")
