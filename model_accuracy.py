@@ -14,7 +14,7 @@ from PIL import Image
 MODEL_PATH = "0.29452_f1max_0.14705_f1_0.78622_loss_0_epoch_model.h5"
 
 # Directory containing images (JPG, PNG, or other formats)
-IMAGE_DIR = "../deep-histopath/data/mitoses/patches/val/normal"
+IMAGE_DIR = "../deep-histopath/data/mitoses/patches/val/mitosis"
 
 # Load the Keras model from .h5
 model = load_model(MODEL_PATH)
