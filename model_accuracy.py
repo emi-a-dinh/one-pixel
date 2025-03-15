@@ -8,7 +8,7 @@ from tensorflow.keras.preprocessing.image import img_to_array
 from tensorflow.image import resize
 import cv2
 import sys
-import Image
+from PIL import Image
 
 # Path to your .h5 model
 MODEL_PATH = "0.29452_f1max_0.14705_f1_0.78622_loss_0_epoch_model.h5"
