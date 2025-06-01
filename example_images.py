@@ -215,13 +215,14 @@ def multi_pixel_attack(image_path, num_pixels=1):
 
 
 def run_attack_with_comparison(image_path, methods=["de", "multi"]):
-    """Run attacks on a single image and save the best multi-pixel result along with original."""
+    """Run attacks on a single image and save the best multi-pixel result along with original and per-pixel versions."""
     results = []
     filename = os.path.basename(image_path)
     base_name, ext = os.path.splitext(filename)
 
     best_multi_result = None
     best_multi_conf_change = -1
+    multi_pixel_paths = {}
 
     try:
         if "de" in methods:
@@ -238,30 +239,41 @@ def run_attack_with_comparison(image_path, methods=["de", "multi"]):
                 mp_result = multi_pixel_attack(image_path, num_pixels=npix)
                 results.append(mp_result)
 
+                attack_img_path = image_path.replace(ext, f"_adv_multi_{npix}{ext}")
+                multi_pixel_paths[npix] = attack_img_path
+
                 if mp_result["confidence_change"] > best_multi_conf_change:
                     best_multi_conf_change = mp_result["confidence_change"]
                     best_multi_result = {
                         "pixels": npix,
-                        "file": image_path.replace(ext, f"_adv_multi_{npix}{ext}")
+                        "file": attack_img_path
                     }
             except Exception as e:
                 print(f"Multi-pixel attack ({npix} pixel) failed on {filename}: {e}")
 
-    # Save best multi-pixel attack and original to new folder
-    if best_multi_result:
-        save_dir = os.path.join("best_pixel_attacks", base_name)
-        os.makedirs(save_dir, exist_ok=True)
+    # Save original and each multi-pixel attack to new folder
+    save_dir = os.path.join("best_pixel_attacks", base_name)
+    os.makedirs(save_dir, exist_ok=True)
 
+    try:
         # Save original image
         original_img = Image.open(image_path).convert("RGB")
         original_img.save(os.path.join(save_dir, f"original{ext}"))
+    except Exception as e:
+        print(f"Failed to save original image for {filename}: {e}")
 
-        # Save best attack image
-        best_img_path = best_multi_result["file"]
-        attacked_img = Image.open(best_img_path)
-        attacked_img.save(os.path.join(save_dir, f"best_multi_pixel_{best_multi_result['pixels']}{ext}"))
+    # Save all 1-, 2-, and 3-pixel adversarial images if they exist
+    for npix in [1, 2, 3]:
+        attack_img_path = multi_pixel_paths.get(npix)
+        if attack_img_path and os.path.exists(attack_img_path):
+            try:
+                attacked_img = Image.open(attack_img_path)
+                attacked_img.save(os.path.join(save_dir, f"multi_pixel_{npix}{ext}"))
+            except Exception as e:
+                print(f"Failed to save multi-pixel {npix} attack for {filename}: {e}")
 
     return results
+
 
 
 def main():
