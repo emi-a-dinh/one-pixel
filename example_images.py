@@ -252,7 +252,7 @@ def run_attack_with_comparison(image_path, methods=["de", "multi"]):
                 print(f"Multi-pixel attack ({npix} pixel) failed on {filename}: {e}")
 
     # Save original and each multi-pixel attack to new folder
-    save_dir = os.path.join("best_pixel_attacks", base_name)
+    save_dir = os.path.join("mitosis", base_name)
     os.makedirs(save_dir, exist_ok=True)
 
     try:
